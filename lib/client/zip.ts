@@ -70,11 +70,14 @@ export async function buildProjectZip(
     const s = scenes[i];
     const res = await fetch(s.image_url!);
     if (!res.ok) throw new Error(`Failed to download image for scene ${s.idx}`);
-    const ext = s.image_url!.includes(".jpg") ? "jpg" : "png";
-    images.file(
-      `${String(s.idx).padStart(3, "0")}_${formatTimestamp(s.start_ms!)}.${ext}`,
-      await res.arrayBuffer()
-    );
+    let bytes = await res.arrayBuffer();
+    let ext = s.image_url!.includes(".jpg") ? "jpg" : s.image_url!.includes(".svg") ? "svg" : "png";
+    if (ext === "svg") {
+      // Video editors don't take SVG — rasterize in the browser, where fonts exist.
+      bytes = await svgToPng(bytes, s.idx);
+      ext = "png";
+    }
+    images.file(`${String(s.idx).padStart(3, "0")}_${formatTimestamp(s.start_ms!)}.${ext}`, bytes);
     onProgress({ step: "Downloading images", current: i + 1, total: scenes.length });
   }
 
@@ -95,6 +98,30 @@ export async function buildProjectZip(
 
   onProgress({ step: "Packaging ZIP" });
   return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+}
+
+/** Rasterize a self-contained SVG to PNG via an offscreen canvas. */
+async function svgToPng(svgBytes: ArrayBuffer, idx: number): Promise<ArrayBuffer> {
+  const blob = new Blob([svgBytes], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error(`Scene ${idx}: SVG image failed to load`));
+      img.src = url;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || 1344;
+    canvas.height = img.naturalHeight || 768;
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const png = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`Scene ${idx}: PNG encode failed`))), "image/png")
+    );
+    return png.arrayBuffer();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export function triggerDownload(blob: Blob, filename: string) {
