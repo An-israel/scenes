@@ -56,11 +56,11 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         if (!keys.gemini) throw e;
         bytes = await generateSvgImage(keys.gemini, scene.image_description, aspect);
-        mimeType = "image/png";
+        mimeType = "image/svg+xml";
       }
     }
 
-    const ext = mimeType.includes("jpeg") ? "jpg" : "png";
+    const ext = mimeType.includes("jpeg") ? "jpg" : mimeType.includes("svg") ? "svg" : "png";
     const path = `${user.id}/${scene.project_id}/scene_${String(scene.idx).padStart(3, "0")}.${ext}`;
     const admin = createAdminClient();
     const { error: uploadError } = await admin.storage
