@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 interface KeyStatus {
   gemini: boolean;
   openai: boolean;
+  deepgram: boolean;
 }
 
 function KeyCard({
@@ -18,7 +19,7 @@ function KeyCard({
 }: {
   title: string;
   description: React.ReactNode;
-  provider: "gemini" | "openai";
+  provider: "gemini" | "openai" | "deepgram";
   hasKey: boolean | null;
   placeholder: string;
   onSaved: () => void;
@@ -116,8 +117,8 @@ export default function SettingsPage() {
   function refresh() {
     fetch("/api/key/save")
       .then((r) => r.json())
-      .then((d) => setStatus({ gemini: !!d.gemini, openai: !!d.openai }))
-      .catch(() => setStatus({ gemini: false, openai: false }));
+      .then((d) => setStatus({ gemini: !!d.gemini, openai: !!d.openai, deepgram: !!d.deepgram }))
+      .catch(() => setStatus({ gemini: false, openai: false, deepgram: false }));
   }
   useEffect(refresh, []);
 
@@ -126,6 +127,30 @@ export default function SettingsPage() {
       <h1 className="mb-8 text-2xl font-bold">Settings</h1>
 
       <div className="space-y-6">
+        <KeyCard
+          title="Deepgram API key — voices (free $200 credit)"
+          provider="deepgram"
+          hasKey={status ? status.deepgram : null}
+          placeholder="Deepgram key…"
+          onSaved={refresh}
+          description={
+            <>
+              The recommended voice engine: new accounts get <span className="text-white/70">$200 of
+              free credit with no card</span> — enough for 100+ hours of narration. Sign up at{" "}
+              <a
+                href="https://console.deepgram.com/signup"
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline"
+              >
+                console.deepgram.com
+              </a>
+              , then create a key under <span className="text-white/70">API Keys</span> and paste it
+              here.
+            </>
+          }
+        />
+
         <KeyCard
           title="OpenAI API key — premium voices & images (optional)"
           provider="openai"
@@ -176,12 +201,9 @@ export default function SettingsPage() {
         <div className="card max-w-xl">
           <h2 className="font-semibold">How the engines are chosen</h2>
           <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-white/60">
-            <li>Script splitting: Gemini if you saved one (free), otherwise OpenAI.</li>
-            <li>Voices: OpenAI if its key is saved, otherwise Gemini (free, ~15 scenes/day).</li>
-            <li>
-              Images: OpenAI if its key is saved, otherwise the free Pollinations.ai service — no
-              key or payment needed.
-            </li>
+            <li>Script splitting &amp; scene art: Gemini (free).</li>
+            <li>Voices: OpenAI if saved, then Deepgram, then Gemini (free, limited per day).</li>
+            <li>Audio is generated in long chunks (~20s each), so few calls cover a whole video.</li>
             <li>Keys are stored encrypted and only ever used server-side for your projects.</li>
           </ul>
         </div>

@@ -48,13 +48,25 @@ export async function buildProjectZip(
     throw new Error(`Scene ${missing[0].idx} is missing assets — regenerate it and finalize again.`);
   }
 
-  onProgress({ step: "Downloading audio", current: 0, total: scenes.length });
+  // Beats in one audio chunk share a file (same storage path, different signed
+  // tokens) — download each chunk once, in order.
+  const pathOf = (u: string) => {
+    try {
+      return new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  };
+  const audioScenes = scenes.filter(
+    (s, i) => i === 0 || pathOf(s.audio_url!) !== pathOf(scenes[i - 1].audio_url!)
+  );
+  onProgress({ step: "Downloading audio", current: 0, total: audioScenes.length });
   const wavBuffers: ArrayBuffer[] = [];
-  for (let i = 0; i < scenes.length; i++) {
-    const res = await fetch(scenes[i].audio_url!);
-    if (!res.ok) throw new Error(`Failed to download audio for scene ${scenes[i].idx}`);
+  for (let i = 0; i < audioScenes.length; i++) {
+    const res = await fetch(audioScenes[i].audio_url!);
+    if (!res.ok) throw new Error(`Failed to download audio for scene ${audioScenes[i].idx}`);
     wavBuffers.push(await res.arrayBuffer());
-    onProgress({ step: "Downloading audio", current: i + 1, total: scenes.length });
+    onProgress({ step: "Downloading audio", current: i + 1, total: audioScenes.length });
   }
 
   onProgress({ step: "Encoding MP3" });

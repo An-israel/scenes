@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { VOICES, OPENAI_VOICES } from "@/lib/voices";
+import { VOICES, OPENAI_VOICES, DEEPGRAM_VOICES } from "@/lib/voices";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -11,21 +11,24 @@ export default function NewProjectPage() {
   const [script, setScript] = useState("");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">("16:9");
-  const [useOpenAI, setUseOpenAI] = useState<boolean | null>(null);
+  const [engine, setEngine] = useState<"openai" | "deepgram" | "gemini" | null>(null);
 
-  // Voice list follows the engine that will actually narrate (OpenAI if its key is saved).
+  // Voice list follows the engine that will actually narrate.
   useEffect(() => {
     fetch("/api/key/save")
       .then((r) => r.json())
       .then((d) => {
-        const openai = !!d.openai;
-        setUseOpenAI(openai);
-        setVoiceId(openai ? OPENAI_VOICES[0].id : VOICES[0].id);
+        const eng = d.openai ? "openai" : d.deepgram ? "deepgram" : "gemini";
+        setEngine(eng);
+        setVoiceId(
+          eng === "openai" ? OPENAI_VOICES[0].id : eng === "deepgram" ? DEEPGRAM_VOICES[0].id : VOICES[0].id
+        );
       })
-      .catch(() => setUseOpenAI(false));
+      .catch(() => setEngine("gemini"));
   }, []);
 
-  const voiceList = useOpenAI ? OPENAI_VOICES : VOICES;
+  const voiceList =
+    engine === "openai" ? OPENAI_VOICES : engine === "deepgram" ? DEEPGRAM_VOICES : VOICES;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
@@ -137,9 +140,9 @@ export default function NewProjectPage() {
           </div>
 
           <p className="label">
-            Voice{useOpenAI != null && (
+            Voice{engine != null && (
               <span className="ml-2 text-xs text-white/30">
-                {useOpenAI ? "OpenAI voices" : "Gemini voices"}
+                {engine === "openai" ? "OpenAI voices" : engine === "deepgram" ? "Deepgram voices" : "Gemini voices"}
               </span>
             )}
           </p>

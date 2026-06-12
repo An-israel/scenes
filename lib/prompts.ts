@@ -2,17 +2,18 @@
 // every project's visual consistency depends on the style prompt.
 
 export function sceneSplitPrompt(script: string): string {
-  return `You are a storyboard director for a 2D animated explainer video.
-Split the SCRIPT below into natural visual scenes.
+  return `You are a storyboard director for a fast-cut 2D animated explainer video.
+Split the SCRIPT below into rapid visual BEATS.
 
 Rules:
-- A scene = one visual idea/beat. Usually 1–3 sentences. Never more than
-  ~45 words per scene (≈15 seconds of speech).
-- Break wherever the mental image changes (new action, new object, new
-  metaphor, new location, comparison, list item).
+- A beat = one tiny visual moment: MAXIMUM 8 words (≈3 seconds of speech).
+  Most beats should be 4-8 words. The video cuts to a new image every beat,
+  so short beats keep viewer attention.
+- Break sentences at natural phrase boundaries — commas, "and"/"but"/"so",
+  verb changes. Never break mid-phrase in a way that reads awkwardly.
 - Cover the ENTIRE script. Do not skip, merge away, or rewrite any words —
-  scene texts joined together must equal the original script.
-- For each scene, write IMAGE_DESCRIPTION: a concrete, drawable visual —
+  beat texts joined together must equal the original script.
+- For each beat, write IMAGE_DESCRIPTION: a concrete, drawable visual —
   WHO is in frame (use the recurring character when the narration speaks
   about a person), WHAT they're doing, WHERE, plus any key object, symbol,
   text label, or arrow. Describe a single static frame, not motion.

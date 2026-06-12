@@ -4,6 +4,8 @@
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash";
+// SVG art uses flash-lite: 4x the free daily quota, plenty for simple vectors.
+export const ART_MODEL = process.env.GEMINI_ART_MODEL ?? "gemini-2.5-flash-lite";
 export const TTS_MODEL = process.env.GEMINI_TTS_MODEL ?? "gemini-2.5-flash-preview-tts";
 export const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
 
@@ -69,7 +71,7 @@ export async function generateJson(apiKey: string, prompt: string): Promise<stri
 
 /** Free-form text generation (no JSON forcing) — used for SVG scene art. */
 export async function generateText(apiKey: string, prompt: string): Promise<string> {
-  const data = await callModel(apiKey, TEXT_MODEL, {
+  const data = await callModel(apiKey, ART_MODEL, {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.7 },
   });

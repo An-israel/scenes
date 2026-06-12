@@ -16,16 +16,18 @@ export async function requireUser() {
 export interface UserKeys {
   gemini: string | null;
   openai: string | null;
+  deepgram: string | null;
 }
 
 /** Fetch + decrypt the caller's provider keys (service role read; columns never leave the server). */
 export async function getUserKeys(userId: string): Promise<UserKeys> {
   const admin = createAdminClient();
-  // Select * so a missing openai column (migration 0003 not run) doesn't error the query.
+  // Select * so a missing provider column (migration not run) doesn't error the query.
   const { data } = await admin.from("profiles").select("*").eq("id", userId).single();
   return {
     gemini: data?.gemini_api_key_encrypted ? decryptSecret(data.gemini_api_key_encrypted) : null,
     openai: data?.openai_api_key_encrypted ? decryptSecret(data.openai_api_key_encrypted) : null,
+    deepgram: data?.deepgram_api_key_encrypted ? decryptSecret(data.deepgram_api_key_encrypted) : null,
   };
 }
 

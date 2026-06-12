@@ -47,8 +47,29 @@ export function getOpenAIVoice(id: string): VoiceOption {
   return OPENAI_VOICES.find((v) => v.id === id) ?? OPENAI_VOICES[0];
 }
 
+// Deepgram Aura voices (used when a Deepgram key is saved and no OpenAI key).
+export const DEEPGRAM_VOICES: VoiceOption[] = [
+  { id: "aura-2-orion-en", label: "Orion — Deep Narrator", style: "deep, confident narrator" },
+  { id: "aura-2-zeus-en", label: "Zeus — Authority", style: "deep, authoritative" },
+  { id: "aura-2-arcas-en", label: "Arcas — Warm Male", style: "warm, natural male" },
+  { id: "aura-2-apollo-en", label: "Apollo — Casual Male", style: "casual, conversational male" },
+  { id: "aura-2-thalia-en", label: "Thalia — Clear Female", style: "clear, confident female" },
+  { id: "aura-2-asteria-en", label: "Asteria — Bright Female", style: "bright, engaging female" },
+  { id: "aura-2-luna-en", label: "Luna — Soft Female", style: "soft, soothing female" },
+  { id: "aura-2-athena-en", label: "Athena — Calm Female", style: "calm, measured female" },
+];
+
+export function isDeepgramVoice(id: string): boolean {
+  return id.startsWith("aura-");
+}
+
+/** Resolve a project's voice for Deepgram, mapping other providers' ids to a default. */
+export function getDeepgramVoice(id: string): VoiceOption {
+  return DEEPGRAM_VOICES.find((v) => v.id === id) ?? DEEPGRAM_VOICES[0];
+}
+
 export function isKnownVoice(id: string): boolean {
-  return VOICES.some((v) => v.id === id) || isOpenAIVoice(id);
+  return VOICES.some((v) => v.id === id) || isOpenAIVoice(id) || isDeepgramVoice(id);
 }
 
 export const PREVIEW_SENTENCE =
