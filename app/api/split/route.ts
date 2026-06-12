@@ -64,17 +64,36 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    const rows = scenes.map((s, i) => ({
-      project_id: projectId,
-      idx: i + 1,
-      text: s.text,
-      image_description: s.image_description,
-      status: "pending",
-    }));
-    const { data: inserted, error: insertError } = await supabase
-      .from("scenes")
-      .insert(rows)
-      .select();
+    // Group beats into ~22s audio chunks: one TTS call voices a whole chunk,
+    // then its duration is split across the beats proportionally.
+    const CHUNK_TARGET_WORDS = 55;
+    const countWords = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+    let chunkIdx = 1;
+    let chunkWords = 0;
+    const rows = scenes.map((s, i) => {
+      const w = countWords(s.text);
+      if (chunkWords > 0 && chunkWords + w > CHUNK_TARGET_WORDS) {
+        chunkIdx++;
+        chunkWords = 0;
+      }
+      chunkWords += w;
+      return {
+        project_id: projectId,
+        idx: i + 1,
+        text: s.text,
+        image_description: s.image_description,
+        status: "pending",
+        chunk_idx: chunkIdx,
+      };
+    });
+    let { data: inserted, error: insertError } = await supabase.from("scenes").insert(rows).select();
+    if (insertError && /chunk_idx/.test(insertError.message)) {
+      // Migration 0004 not run yet — fall back to unchunked (per-beat audio).
+      ({ data: inserted, error: insertError } = await supabase
+        .from("scenes")
+        .insert(rows.map(({ chunk_idx: _omit, ...r }) => r))
+        .select());
+    }
     if (insertError) return jsonError(insertError.message, 500);
 
     await supabase.from("projects").update({ status: "generating" }).eq("id", projectId);

@@ -63,27 +63,39 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }, []);
 
-  /** Generate missing audio + image for one scene (parallel within the scene). */
+  /** Generate missing audio + image for one scene (parallel within the scene).
+   *  Voicing fills the scene's whole audio chunk, so the returned patches can
+   *  cover many beats — the run loop uses them to skip already-voiced ones. */
   const processScene = useCallback(
-    async (scene: Scene, position: number, total: number) => {
+    async (scene: Scene, position: number, total: number): Promise<Array<{ id: string; patch: Partial<Scene> }>> => {
+      const patches: Array<{ id: string; patch: Partial<Scene> }> = [];
       const jobs: Promise<void>[] = [];
       if (!scene.audio_path) {
         setStatusLine(`Scene ${position}/${total}: voicing…`);
         jobs.push(
-          callApi("/api/tts", { sceneId: scene.id }).then((d: any) =>
-            updateScene(scene.id, { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status })
-          )
+          callApi("/api/tts", { sceneId: scene.id }).then((d: any) => {
+            const updatedScenes =
+              d.scenes ?? [{ id: scene.id, audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }];
+            for (const u of updatedScenes) {
+              const patch = { audio_path: u.audio_path, duration_ms: u.duration_ms, status: u.status };
+              updateScene(u.id, patch);
+              patches.push({ id: u.id, patch });
+            }
+          })
         );
       }
       if (!scene.image_path) {
         setStatusLine(`Scene ${position}/${total}: ${scene.audio_path ? "drawing…" : "voicing + drawing…"}`);
         jobs.push(
-          callApi("/api/image", { sceneId: scene.id }).then((d: any) =>
-            updateScene(scene.id, { image_path: d.image_path, status: d.status })
-          )
+          callApi("/api/image", { sceneId: scene.id }).then((d: any) => {
+            const patch = { image_path: d.image_path, status: d.status };
+            updateScene(scene.id, patch);
+            patches.push({ id: scene.id, patch });
+          })
         );
       }
       await Promise.all(jobs);
+      return patches;
     },
     [updateScene]
   );
@@ -104,15 +116,18 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       }
 
       // 2. Per-scene generation, sequential across scenes (free-tier friendly).
+      // Track completions locally — React state lags inside this async loop,
+      // and a chunked TTS call completes several beats at once.
       setPhase("generating");
-      const total = currentScenes.length;
+      let local = scenesRef.current.length === currentScenes.length ? [...scenesRef.current] : [...currentScenes];
+      const total = local.length;
       for (let i = 0; i < total; i++) {
-        // State updates lag inside this async loop — fall back to the split
-        // result so a fresh project doesn't crash before first render.
-        const scene =
-          scenesRef.current.find((s) => s.id === currentScenes[i].id) ?? currentScenes[i];
+        const scene = local[i];
         if (scene.audio_path && scene.image_path) continue;
-        await processScene(scene, i + 1, total);
+        const patches = await processScene(scene, i + 1, total);
+        for (const p of patches) {
+          local = local.map((s) => (s.id === p.id ? { ...s, ...p.patch } : s));
+        }
         refreshAssets(); // fire-and-forget thumbnail refresh
       }
 
@@ -154,12 +169,18 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
     setError(null);
     try {
       const d: any = await callApi(kind === "audio" ? "/api/tts" : "/api/image", { sceneId: scene.id });
-      updateScene(
-        scene.id,
-        kind === "audio"
-          ? { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }
-          : { image_path: d.image_path, status: d.status }
-      );
+      if (kind === "audio" && d.scenes) {
+        for (const u of d.scenes) {
+          updateScene(u.id, { audio_path: u.audio_path, duration_ms: u.duration_ms, status: u.status });
+        }
+      } else {
+        updateScene(
+          scene.id,
+          kind === "audio"
+            ? { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }
+            : { image_path: d.image_path, status: d.status }
+        );
+      }
       // Re-finalize so timestamps stay exact after an audio regen.
       await callApi("/api/finalize", { projectId: project.id }).catch(() => {});
       await refreshAssets();
@@ -319,8 +340,10 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       {/* Scene grid */}
       {scenes.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {scenes.map((s) => {
+          {scenes.map((s, i) => {
             const a = assetByScene.get(s.id);
+            // Beats in one audio chunk share a file — show player/regen on the first only.
+            const chunkLead = !s.audio_path || i === 0 || scenes[i - 1].audio_path !== s.audio_path;
             return (
               <div key={s.id} className="card p-0 overflow-hidden">
                 <div className={`${frameClass} bg-ink`}>
@@ -342,18 +365,20 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
                     </span>
                   </div>
                   <p className="mt-2 line-clamp-3 text-sm text-white/70">{s.text}</p>
-                  {a?.audio_url && (
+                  {a?.audio_url && chunkLead && (
                     <audio src={a.audio_url} controls preload="none" className="mt-3 h-8 w-full" />
                   )}
                   {!isRunning && (
                     <div className="mt-3 flex gap-2">
-                      <button
-                        onClick={() => regenerate(s, "audio")}
-                        disabled={busyScene !== null}
-                        className="btn-ghost flex-1 px-2 py-1.5 text-xs"
-                      >
-                        {busyScene === s.id + "audio" ? "Voicing…" : "↻ Audio"}
-                      </button>
+                      {chunkLead && (
+                        <button
+                          onClick={() => regenerate(s, "audio")}
+                          disabled={busyScene !== null}
+                          className="btn-ghost flex-1 px-2 py-1.5 text-xs"
+                        >
+                          {busyScene === s.id + "audio" ? "Voicing…" : "↻ Audio"}
+                        </button>
+                      )}
                       <button
                         onClick={() => regenerate(s, "image")}
                         disabled={busyScene !== null}

@@ -28,6 +28,7 @@ export interface Scene {
   duration_ms: number | null;
   start_ms: number | null;
   status: SceneStatus;
+  chunk_idx?: number | null;
 }
 
 export interface SceneAssetUrls {

@@ -9,7 +9,16 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateSpeech, withRetry } from "@/lib/gemini";
 import { openaiSpeech } from "@/lib/openai";
-import { getVoice, getOpenAIVoice, isOpenAIVoice, isKnownVoice, PREVIEW_SENTENCE } from "@/lib/voices";
+import { deepgramSpeech } from "@/lib/deepgram";
+import {
+  getVoice,
+  getOpenAIVoice,
+  getDeepgramVoice,
+  isOpenAIVoice,
+  isDeepgramVoice,
+  isKnownVoice,
+  PREVIEW_SENTENCE,
+} from "@/lib/voices";
 import { ttsPrompt } from "@/lib/prompts";
 import { parseRateFromMime, pcmToWav } from "@/lib/wav";
 
@@ -25,7 +34,6 @@ export async function POST(req: NextRequest) {
 
     const { voiceId } = await req.json();
     if (!isKnownVoice(voiceId)) return jsonError("Unknown voice", 400);
-    const useOpenAI = isOpenAIVoice(voiceId);
 
     const path = `previews/${voiceId}.wav`;
     const admin = createAdminClient();
@@ -36,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!existing?.some((f) => f.name === `${voiceId}.wav`)) {
       const keys = await getUserKeys(user.id);
       let wav: Buffer;
-      if (useOpenAI) {
+      if (isOpenAIVoice(voiceId)) {
         if (!keys.openai) return jsonError(NO_KEY_MESSAGE, 400);
         const voice = getOpenAIVoice(voiceId);
         wav = await withRetry(() =>
@@ -46,6 +54,11 @@ export async function POST(req: NextRequest) {
             voice.id,
             `Narrate in a ${voice.style} tone. Natural pace, clear diction.`
           )
+        );
+      } else if (isDeepgramVoice(voiceId)) {
+        if (!keys.deepgram) return jsonError(NO_KEY_MESSAGE, 400);
+        wav = await withRetry(() =>
+          deepgramSpeech(keys.deepgram!, PREVIEW_SENTENCE, getDeepgramVoice(voiceId).id)
         );
       } else {
         if (!keys.gemini) return jsonError(NO_KEY_MESSAGE, 400);
