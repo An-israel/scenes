@@ -67,6 +67,19 @@ export async function generateJson(apiKey: string, prompt: string): Promise<stri
   return text;
 }
 
+/** Free-form text generation (no JSON forcing) — used for SVG scene art. */
+export async function generateText(apiKey: string, prompt: string): Promise<string> {
+  const data = await callModel(apiKey, TEXT_MODEL, {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.7 },
+  });
+  const text = data?.candidates?.[0]?.content?.parts
+    ?.map((p: any) => p.text ?? "")
+    .join("");
+  if (!text) throw new GeminiError("Gemini returned an empty response", 502);
+  return text;
+}
+
 /** Single-speaker TTS. Returns raw PCM plus its mime type (carries sample rate). */
 export async function generateSpeech(
   apiKey: string,
