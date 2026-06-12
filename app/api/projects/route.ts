@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     const { user, supabase, error } = await requireUser();
     if (error) return error;
 
-    const { title, script, voiceId } = await req.json();
+    const { title, script, voiceId, aspectRatio } = await req.json();
 
     if (typeof script !== "string" || script.trim().length < 10) {
       return jsonError("Script is too short.", 400);
@@ -23,18 +23,25 @@ export async function POST(req: NextRequest) {
     if (!VOICES.some((v) => v.id === voiceId)) {
       return jsonError("Unknown voice.", 400);
     }
+    const aspect = aspectRatio === "9:16" ? "9:16" : "16:9";
 
-    const { data, error: dbError } = await supabase
+    const row = {
+      user_id: user.id,
+      title: typeof title === "string" && title.trim() ? title.trim() : "Untitled",
+      script: script.trim(),
+      voice_id: voiceId,
+      status: "draft",
+    };
+
+    let { data, error: dbError } = await supabase
       .from("projects")
-      .insert({
-        user_id: user.id,
-        title: typeof title === "string" && title.trim() ? title.trim() : "Untitled",
-        script: script.trim(),
-        voice_id: voiceId,
-        status: "draft",
-      })
+      .insert({ ...row, aspect_ratio: aspect })
       .select()
       .single();
+    // Graceful degrade if migration 0002 hasn't been run yet.
+    if (dbError && /aspect_ratio/.test(dbError.message)) {
+      ({ data, error: dbError } = await supabase.from("projects").insert(row).select().single());
+    }
     if (dbError) return jsonError(dbError.message, 500);
 
     return NextResponse.json({ project: data });

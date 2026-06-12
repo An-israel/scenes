@@ -107,7 +107,10 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       setPhase("generating");
       const total = currentScenes.length;
       for (let i = 0; i < total; i++) {
-        const scene = scenesRef.current.find((s) => s.id === currentScenes[i].id)!;
+        // State updates lag inside this async loop — fall back to the split
+        // result so a fresh project doesn't crash before first render.
+        const scene =
+          scenesRef.current.find((s) => s.id === currentScenes[i].id) ?? currentScenes[i];
         if (scene.audio_path && scene.image_path) continue;
         await processScene(scene, i + 1, total);
         refreshAssets(); // fire-and-forget thumbnail refresh
@@ -203,6 +206,8 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
   }
 
   const assetByScene = new Map(assets.map((a) => [a.id, a]));
+  const isVertical = project.aspect_ratio === "9:16";
+  const frameClass = isVertical ? "aspect-[9/16] mx-auto max-w-[220px]" : "aspect-video";
 
   return (
     <div>
@@ -211,6 +216,7 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
           <h1 className="text-2xl font-bold">{project.title}</h1>
           <p className="mt-1 text-sm text-white/40">
             Voice: {project.voice_id}
+            {` · ${isVertical ? "9:16 vertical" : "16:9 landscape"}`}
             {project.total_duration_ms ? ` · ${formatClock(project.total_duration_ms)} total` : ""}
             {scenes.length > 0 ? ` · ${scenes.length} scenes` : ""}
           </p>
@@ -294,7 +300,7 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
             const a = assetByScene.get(s.id);
             return (
               <div key={s.id} className="card p-0 overflow-hidden">
-                <div className="aspect-video bg-ink">
+                <div className={`${frameClass} bg-ink`}>
                   {a?.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={a.image_url} alt={`Scene ${s.idx}`} className="h-full w-full object-cover" />

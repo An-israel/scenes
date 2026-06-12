@@ -1,5 +1,6 @@
 export type ProjectStatus = "draft" | "splitting" | "generating" | "done" | "error";
 export type SceneStatus = "pending" | "audio_done" | "image_done" | "done" | "error";
+export type AspectRatio = "16:9" | "9:16";
 
 export interface Project {
   id: string;
@@ -7,6 +8,7 @@ export interface Project {
   title: string;
   script: string;
   voice_id: string;
+  aspect_ratio?: AspectRatio; // missing on rows created before migration 0002 → treat as 16:9
   status: ProjectStatus;
   total_duration_ms: number | null;
   zip_path: string | null;

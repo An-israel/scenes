@@ -27,7 +27,11 @@ SCRIPT:
 ${script}`;
 }
 
-export function imagePrompt(imageDescription: string): string {
+export function imagePrompt(imageDescription: string, aspectRatio: "16:9" | "9:16" = "16:9"): string {
+  const frame =
+    aspectRatio === "9:16"
+      ? "9:16 vertical portrait frame (TikTok/Shorts)"
+      : "16:9";
   return `2D hand-drawn explainer cartoon, minimalist stick-figure style. Characters:
 simple stick bodies with bold black ink outlines, round white heads, large
 simple dot eyes, expressive shaggy scribbled hair, minimal facial features.
@@ -35,8 +39,8 @@ Flat solid colors, no gradients, no shading, no texture. Thick uniform
 black outlines on every element. Simple flat background in warm muted
 tones (sandy beige ground, burnt-orange or off-white sky), minimal props
 drawn in the same naive doodle style. Generous empty space, composition
-readable in 1 second. Educational YouTube explainer animation frame,
-16:9, high resolution. NO photorealism, NO 3D, NO gradients, NO small
+readable in 1 second. Educational explainer animation frame,
+${frame}, high resolution. NO photorealism, NO 3D, NO gradients, NO small
 unreadable text, NO watermark.
 
 SCENE TO DRAW: ${imageDescription}`;

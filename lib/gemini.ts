@@ -90,16 +90,17 @@ export async function generateSpeech(
   };
 }
 
-/** 16:9 image generation with the locked style prompt already applied. */
+/** Image generation with the locked style prompt already applied. */
 export async function generateImage(
   apiKey: string,
-  prompt: string
+  prompt: string,
+  aspectRatio: "16:9" | "9:16" = "16:9"
 ): Promise<{ bytes: Buffer; mimeType: string }> {
   const data = await callModel(apiKey, IMAGE_MODEL, {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: { aspectRatio: "16:9" },
+      imageConfig: { aspectRatio },
     },
   });
   const part = data?.candidates?.[0]?.content?.parts?.find((p: any) =>
