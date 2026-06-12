@@ -3,19 +3,30 @@
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 
-export default function SettingsPage() {
-  const [hasKey, setHasKey] = useState<boolean | null>(null);
+interface KeyStatus {
+  gemini: boolean;
+  openai: boolean;
+}
+
+function KeyCard({
+  title,
+  description,
+  provider,
+  hasKey,
+  placeholder,
+  onSaved,
+}: {
+  title: string;
+  description: React.ReactNode;
+  provider: "gemini" | "openai";
+  hasKey: boolean | null;
+  placeholder: string;
+  onSaved: () => void;
+}) {
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/key/save")
-      .then((r) => r.json())
-      .then((d) => setHasKey(!!d.hasKey))
-      .catch(() => setHasKey(false));
-  }, []);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -26,13 +37,13 @@ export default function SettingsPage() {
       const res = await fetch("/api/key/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({ apiKey, provider }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save key");
-      setHasKey(true);
       setApiKey("");
-      setMessage(`Key validated and saved (${data.masked}). You're ready to forge.`);
+      setMessage(`Key validated and saved (${data.masked}).`);
+      onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save key");
     } finally {
@@ -41,60 +52,109 @@ export default function SettingsPage() {
   }
 
   return (
+    <div className="card max-w-xl">
+      <h2 className="font-semibold">{title}</h2>
+      <p className="mt-1 text-sm text-white/50">{description}</p>
+
+      {hasKey === null ? (
+        <p className="mt-4 text-sm text-white/40">Checking…</p>
+      ) : hasKey ? (
+        <p className="mt-4 text-sm text-gold">✓ A key is on file. Paste a new one below to replace it.</p>
+      ) : (
+        <p className="mt-4 text-sm text-white/40">No key saved yet.</p>
+      )}
+
+      <form onSubmit={save} className="mt-4 flex flex-col gap-3 sm:flex-row">
+        <input
+          className="input flex-1"
+          type="password"
+          placeholder={placeholder}
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          autoComplete="off"
+        />
+        <button type="submit" disabled={busy || apiKey.trim().length < 20} className="btn-gold">
+          {busy ? "Validating…" : "Save key"}
+        </button>
+      </form>
+
+      {message && <p className="mt-3 text-sm text-gold">{message}</p>}
+      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  const [status, setStatus] = useState<KeyStatus | null>(null);
+
+  function refresh() {
+    fetch("/api/key/save")
+      .then((r) => r.json())
+      .then((d) => setStatus({ gemini: !!d.gemini, openai: !!d.openai }))
+      .catch(() => setStatus({ gemini: false, openai: false }));
+  }
+  useEffect(refresh, []);
+
+  return (
     <AppShell>
       <h1 className="mb-8 text-2xl font-bold">Settings</h1>
 
-      <div className="card max-w-xl">
-        <h2 className="font-semibold">Gemini API key</h2>
-        <p className="mt-1 text-sm text-white/50">
-          SceneForge runs entirely on your own free Google AI Studio key. It's stored encrypted
-          and only used server-side for your projects.
-        </p>
+      <div className="space-y-6">
+        <KeyCard
+          title="OpenAI API key — voices & images"
+          provider="openai"
+          hasKey={status ? status.openai : null}
+          placeholder="sk-…"
+          onSaved={refresh}
+          description={
+            <>
+              Powers narration (gpt-4o-mini-tts) and scene images (gpt-image-1). Requires a paid
+              OpenAI account with billing enabled — create a key at{" "}
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline"
+              >
+                platform.openai.com/api-keys
+              </a>
+              . A typical 10-minute video costs roughly $1–2.
+            </>
+          }
+        />
 
-        {hasKey === null ? (
-          <p className="mt-4 text-sm text-white/40">Checking…</p>
-        ) : hasKey ? (
-          <p className="mt-4 text-sm text-gold">✓ A key is on file. Paste a new one below to replace it.</p>
-        ) : (
-          <p className="mt-4 text-sm text-red-400">No key yet — generation won't work until you add one.</p>
-        )}
+        <KeyCard
+          title="Google Gemini key — script splitting (free)"
+          provider="gemini"
+          hasKey={status ? status.gemini : null}
+          placeholder="AIza…"
+          onSaved={refresh}
+          description={
+            <>
+              Used to storyboard your script into scenes — free tier covers this. Get one at{" "}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline"
+              >
+                aistudio.google.com/apikey
+              </a>
+              . Optional if you have an OpenAI key (splitting falls back to OpenAI). Note: Google's
+              free tier does <span className="text-white/70">not</span> include image generation via
+              the API — that's why OpenAI handles images when its key is present.
+            </>
+          }
+        />
 
-        <form onSubmit={save} className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <input
-            className="input flex-1"
-            type="password"
-            placeholder="AIza…"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            autoComplete="off"
-          />
-          <button type="submit" disabled={busy || apiKey.trim().length < 20} className="btn-gold">
-            {busy ? "Validating…" : "Save key"}
-          </button>
-        </form>
-
-        {message && <p className="mt-3 text-sm text-gold">{message}</p>}
-        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
-      </div>
-
-      <div className="card mt-6 max-w-xl">
-        <h2 className="font-semibold">How to get a free key</h2>
-        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-white/60">
-          <li>
-            Go to{" "}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noreferrer"
-              className="text-gold underline"
-            >
-              aistudio.google.com/apikey
-            </a>{" "}
-            and sign in with any Google account.
-          </li>
-          <li>Click “Create API key” and copy it.</li>
-          <li>Paste it above and hit Save. Done — the free tier covers regular use.</li>
-        </ol>
+        <div className="card max-w-xl">
+          <h2 className="font-semibold">How the engines are chosen</h2>
+          <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-white/60">
+            <li>Script splitting: Gemini if you saved one (free), otherwise OpenAI.</li>
+            <li>Voices &amp; images: OpenAI whenever its key is saved, otherwise Gemini.</li>
+            <li>Keys are stored encrypted and only ever used server-side for your projects.</li>
+          </ul>
+        </div>
       </div>
     </AppShell>
   );

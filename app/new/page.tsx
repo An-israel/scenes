@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { VOICES } from "@/lib/voices";
+import { VOICES, OPENAI_VOICES } from "@/lib/voices";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -11,6 +11,21 @@ export default function NewProjectPage() {
   const [script, setScript] = useState("");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">("16:9");
+  const [useOpenAI, setUseOpenAI] = useState<boolean | null>(null);
+
+  // Voice list follows the engine that will actually narrate (OpenAI if its key is saved).
+  useEffect(() => {
+    fetch("/api/key/save")
+      .then((r) => r.json())
+      .then((d) => {
+        const openai = !!d.openai;
+        setUseOpenAI(openai);
+        setVoiceId(openai ? OPENAI_VOICES[0].id : VOICES[0].id);
+      })
+      .catch(() => setUseOpenAI(false));
+  }, []);
+
+  const voiceList = useOpenAI ? OPENAI_VOICES : VOICES;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
@@ -121,9 +136,15 @@ export default function NewProjectPage() {
             ))}
           </div>
 
-          <p className="label">Voice</p>
+          <p className="label">
+            Voice{useOpenAI != null && (
+              <span className="ml-2 text-xs text-white/30">
+                {useOpenAI ? "OpenAI voices" : "Gemini voices"}
+              </span>
+            )}
+          </p>
           <div className="space-y-2">
-            {VOICES.map((v) => (
+            {voiceList.map((v) => (
               <div
                 key={v.id}
                 className={`flex items-center justify-between rounded-lg border px-4 py-3 transition ${

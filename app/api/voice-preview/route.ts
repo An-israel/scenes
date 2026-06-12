@@ -3,12 +3,13 @@ import {
   requireUser,
   jsonError,
   handleRouteError,
-  getUserGeminiKey,
+  getUserKeys,
   NO_KEY_MESSAGE,
 } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateSpeech, withRetry } from "@/lib/gemini";
-import { getVoice, VOICES, PREVIEW_SENTENCE } from "@/lib/voices";
+import { openaiSpeech } from "@/lib/openai";
+import { getVoice, getOpenAIVoice, isOpenAIVoice, isKnownVoice, PREVIEW_SENTENCE } from "@/lib/voices";
 import { ttsPrompt } from "@/lib/prompts";
 import { parseRateFromMime, pcmToWav } from "@/lib/wav";
 
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const { voiceId } = await req.json();
-    if (!VOICES.some((v) => v.id === voiceId)) return jsonError("Unknown voice", 400);
+    if (!isKnownVoice(voiceId)) return jsonError("Unknown voice", 400);
+    const useOpenAI = isOpenAIVoice(voiceId);
 
     const path = `previews/${voiceId}.wav`;
     const admin = createAdminClient();
@@ -32,13 +34,27 @@ export async function POST(req: NextRequest) {
       search: `${voiceId}.wav`,
     });
     if (!existing?.some((f) => f.name === `${voiceId}.wav`)) {
-      const apiKey = await getUserGeminiKey(user.id);
-      if (!apiKey) return jsonError(NO_KEY_MESSAGE, 400);
-      const voice = getVoice(voiceId);
-      const { pcm, mimeType } = await withRetry(() =>
-        generateSpeech(apiKey, ttsPrompt(voice.style, PREVIEW_SENTENCE), voice.id)
-      );
-      const wav = pcmToWav(pcm, parseRateFromMime(mimeType));
+      const keys = await getUserKeys(user.id);
+      let wav: Buffer;
+      if (useOpenAI) {
+        if (!keys.openai) return jsonError(NO_KEY_MESSAGE, 400);
+        const voice = getOpenAIVoice(voiceId);
+        wav = await withRetry(() =>
+          openaiSpeech(
+            keys.openai!,
+            PREVIEW_SENTENCE,
+            voice.id,
+            `Narrate in a ${voice.style} tone. Natural pace, clear diction.`
+          )
+        );
+      } else {
+        if (!keys.gemini) return jsonError(NO_KEY_MESSAGE, 400);
+        const voice = getVoice(voiceId);
+        const { pcm, mimeType } = await withRetry(() =>
+          generateSpeech(keys.gemini!, ttsPrompt(voice.style, PREVIEW_SENTENCE), voice.id)
+        );
+        wav = pcmToWav(pcm, parseRateFromMime(mimeType));
+      }
       const { error: uploadError } = await admin.storage
         .from("assets")
         .upload(path, wav, { contentType: "audio/wav", upsert: true });
