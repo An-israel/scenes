@@ -1,0 +1,109 @@
+"use client";
+
+import JSZip from "jszip";
+import { wavsToMp3 } from "./audio";
+import type { SceneAssetUrls } from "@/lib/types";
+
+export function formatTimestamp(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, "0")}m${String(s).padStart(2, "0")}s`;
+}
+
+export function formatClock(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function csvEscape(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+const README = `HOW TO ASSEMBLE IN CAPCUT
+1. New project -> import audio.mp3 + all images.
+2. Drag audio.mp3 to the timeline first.
+3. Drag images in order. Each filename = the time it should START.
+   e.g. 004_01m12s.png starts at 1:12. Stretch each image until the next one.
+4. timeline.csv has exact start/end/duration per scene if you want precision.
+5. Add captions, export 1080p. Done.
+`;
+
+export interface ZipProgress {
+  step: string;
+  current?: number;
+  total?: number;
+}
+
+/** Fetch all assets, build audio.mp3 + images + timeline.csv + readme.txt into a ZIP blob. */
+export async function buildProjectZip(
+  assets: SceneAssetUrls[],
+  onProgress: (p: ZipProgress) => void
+): Promise<Blob> {
+  const scenes = [...assets].sort((a, b) => a.idx - b.idx);
+  const missing = scenes.filter((s) => !s.audio_url || !s.image_url || s.start_ms == null);
+  if (missing.length > 0) {
+    throw new Error(`Scene ${missing[0].idx} is missing assets — regenerate it and finalize again.`);
+  }
+
+  onProgress({ step: "Downloading audio", current: 0, total: scenes.length });
+  const wavBuffers: ArrayBuffer[] = [];
+  for (let i = 0; i < scenes.length; i++) {
+    const res = await fetch(scenes[i].audio_url!);
+    if (!res.ok) throw new Error(`Failed to download audio for scene ${scenes[i].idx}`);
+    wavBuffers.push(await res.arrayBuffer());
+    onProgress({ step: "Downloading audio", current: i + 1, total: scenes.length });
+  }
+
+  onProgress({ step: "Encoding MP3" });
+  const mp3 = wavsToMp3(wavBuffers);
+
+  const zip = new JSZip();
+  zip.file("audio.mp3", mp3);
+  zip.file("readme.txt", README);
+
+  const images = zip.folder("images")!;
+  onProgress({ step: "Downloading images", current: 0, total: scenes.length });
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
+    const res = await fetch(s.image_url!);
+    if (!res.ok) throw new Error(`Failed to download image for scene ${s.idx}`);
+    const ext = s.image_url!.includes(".jpg") ? "jpg" : "png";
+    images.file(
+      `${String(s.idx).padStart(3, "0")}_${formatTimestamp(s.start_ms!)}.${ext}`,
+      await res.arrayBuffer()
+    );
+    onProgress({ step: "Downloading images", current: i + 1, total: scenes.length });
+  }
+
+  const csvRows = ["scene,start,end,duration_seconds,text"];
+  for (const s of scenes) {
+    const end = s.start_ms! + (s.duration_ms ?? 0);
+    csvRows.push(
+      [
+        String(s.idx),
+        formatClock(s.start_ms!),
+        formatClock(end),
+        ((s.duration_ms ?? 0) / 1000).toFixed(2),
+        csvEscape(s.text),
+      ].join(",")
+    );
+  }
+  zip.file("timeline.csv", csvRows.join("\n") + "\n");
+
+  onProgress({ step: "Packaging ZIP" });
+  return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+}
+
+export function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
