@@ -13,16 +13,24 @@ export async function requireUser() {
   return { user, supabase, error: null };
 }
 
-/** Fetch + decrypt the caller's Gemini key (service role read; column never leaves the server). */
-export async function getUserGeminiKey(userId: string): Promise<string | null> {
+export interface UserKeys {
+  gemini: string | null;
+  openai: string | null;
+}
+
+/** Fetch + decrypt the caller's provider keys (service role read; columns never leave the server). */
+export async function getUserKeys(userId: string): Promise<UserKeys> {
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("profiles")
-    .select("gemini_api_key_encrypted")
-    .eq("id", userId)
-    .single();
-  if (!data?.gemini_api_key_encrypted) return null;
-  return decryptSecret(data.gemini_api_key_encrypted);
+  // Select * so a missing openai column (migration 0003 not run) doesn't error the query.
+  const { data } = await admin.from("profiles").select("*").eq("id", userId).single();
+  return {
+    gemini: data?.gemini_api_key_encrypted ? decryptSecret(data.gemini_api_key_encrypted) : null,
+    openai: data?.openai_api_key_encrypted ? decryptSecret(data.openai_api_key_encrypted) : null,
+  };
+}
+
+export async function getUserGeminiKey(userId: string): Promise<string | null> {
+  return (await getUserKeys(userId)).gemini;
 }
 
 export function jsonError(message: string, status: number) {
@@ -39,4 +47,4 @@ export function handleRouteError(e: unknown) {
 }
 
 export const NO_KEY_MESSAGE =
-  "No Gemini API key on file. Add your free AI Studio key in Settings first.";
+  "No API key on file. Add your OpenAI key (or free Gemini key) in Settings first.";

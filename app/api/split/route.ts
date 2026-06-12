@@ -3,10 +3,11 @@ import {
   requireUser,
   jsonError,
   handleRouteError,
-  getUserGeminiKey,
+  getUserKeys,
   NO_KEY_MESSAGE,
 } from "@/lib/api-helpers";
 import { generateJson, withRetry } from "@/lib/gemini";
+import { openaiGenerateJson } from "@/lib/openai";
 import { sceneSplitPrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
@@ -41,14 +42,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ scenes: existing });
     }
 
-    const apiKey = await getUserGeminiKey(user.id);
-    if (!apiKey) return jsonError(NO_KEY_MESSAGE, 400);
+    // Splitting prefers the free Gemini key; falls back to OpenAI.
+    const keys = await getUserKeys(user.id);
+    const generate = keys.gemini
+      ? (p: string) => generateJson(keys.gemini!, p)
+      : keys.openai
+        ? (p: string) => openaiGenerateJson(keys.openai!, p)
+        : null;
+    if (!generate) return jsonError(NO_KEY_MESSAGE, 400);
 
     await supabase.from("projects").update({ status: "splitting", error_message: null }).eq("id", projectId);
 
     let scenes: SplitScene[];
     try {
-      scenes = await splitWithRetry(apiKey, project.script);
+      scenes = await splitWithRetry(generate, project.script);
     } catch (e) {
       await supabase
         .from("projects")
@@ -80,17 +87,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function splitWithRetry(apiKey: string, script: string): Promise<SplitScene[]> {
+async function splitWithRetry(
+  generate: (prompt: string) => Promise<string>,
+  script: string
+): Promise<SplitScene[]> {
   const prompt = sceneSplitPrompt(script);
-  let raw = await withRetry(() => generateJson(apiKey, prompt));
+  let raw = await withRetry(() => generate(prompt));
   let result = parseScenes(raw, script);
   if (result.ok) return result.scenes;
   const firstProblem = result.problem;
 
   // One repair pass: tell the model exactly what was wrong with its JSON.
   raw = await withRetry(() =>
-    generateJson(
-      apiKey,
+    generate(
       `${prompt}\n\nYour previous answer was invalid: ${firstProblem}\nReturn corrected STRICT JSON only.`
     )
   );

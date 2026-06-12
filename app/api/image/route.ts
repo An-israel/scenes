@@ -3,11 +3,12 @@ import {
   requireUser,
   jsonError,
   handleRouteError,
-  getUserGeminiKey,
+  getUserKeys,
   NO_KEY_MESSAGE,
 } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateImage, withRetry } from "@/lib/gemini";
+import { openaiImage } from "@/lib/openai";
 import { imagePrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
@@ -27,8 +28,8 @@ export async function POST(req: NextRequest) {
       .single();
     if (!scene) return jsonError("Scene not found", 404);
 
-    const apiKey = await getUserGeminiKey(user.id);
-    if (!apiKey) return jsonError(NO_KEY_MESSAGE, 400);
+    const keys = await getUserKeys(user.id);
+    if (!keys.openai && !keys.gemini) return jsonError(NO_KEY_MESSAGE, 400);
 
     // Project orientation; default 16:9 for rows predating migration 0002.
     let aspect: "16:9" | "9:16" = "16:9";
@@ -39,9 +40,15 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (proj && (proj as any).aspect_ratio === "9:16") aspect = "9:16";
 
-    const { bytes, mimeType } = await withRetry(() =>
-      generateImage(apiKey, imagePrompt(scene.image_description, aspect), aspect)
-    );
+    const prompt = imagePrompt(scene.image_description, aspect);
+    let bytes: Buffer;
+    let mimeType: string;
+    if (keys.openai) {
+      bytes = await withRetry(() => openaiImage(keys.openai!, prompt, aspect));
+      mimeType = "image/png";
+    } else {
+      ({ bytes, mimeType } = await withRetry(() => generateImage(keys.gemini!, prompt, aspect)));
+    }
 
     const ext = mimeType.includes("jpeg") ? "jpg" : "png";
     const path = `${user.id}/${scene.project_id}/scene_${String(scene.idx).padStart(3, "0")}.${ext}`;

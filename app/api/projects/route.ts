@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, jsonError, handleRouteError } from "@/lib/api-helpers";
-import { VOICES } from "@/lib/voices";
+import { isKnownVoice } from "@/lib/voices";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     if (words > MAX_WORDS) {
       return jsonError(`Script is ${words} words — keep it under ${MAX_WORDS} (~10 minutes).`, 400);
     }
-    if (!VOICES.some((v) => v.id === voiceId)) {
+    if (!isKnownVoice(voiceId)) {
       return jsonError("Unknown voice.", 400);
     }
     const aspect = aspectRatio === "9:16" ? "9:16" : "16:9";
