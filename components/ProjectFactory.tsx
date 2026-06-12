@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { buildProjectZip, triggerDownload, formatClock, type ZipProgress } from "@/lib/client/zip";
+import { buildProjectZip, triggerDownload, formatClock, svgToPng, type ZipProgress } from "@/lib/client/zip";
 import type { Project, Scene, SceneAssetUrls } from "@/lib/types";
 
 interface Props {
@@ -165,6 +165,29 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       await refreshAssets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Regenerate failed");
+    } finally {
+      setBusyScene(null);
+    }
+  }
+
+  async function downloadImage(scene: Scene, imageUrl: string) {
+    setBusyScene(scene.id + "dl");
+    setError(null);
+    try {
+      const res = await fetch(imageUrl);
+      if (!res.ok) throw new Error(`Could not download scene ${scene.idx} image`);
+      let bytes = await res.arrayBuffer();
+      let ext = imageUrl.includes(".svg") ? "svg" : imageUrl.includes(".jpg") ? "jpg" : "png";
+      if (ext === "svg") {
+        bytes = await svgToPng(bytes, scene.idx);
+        ext = "png";
+      }
+      triggerDownload(
+        new Blob([bytes], { type: ext === "jpg" ? "image/jpeg" : "image/png" }),
+        `scene_${String(scene.idx).padStart(3, "0")}.${ext}`
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Image download failed");
     } finally {
       setBusyScene(null);
     }
@@ -338,6 +361,15 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
                       >
                         {busyScene === s.id + "image" ? "Drawing…" : "↻ Image"}
                       </button>
+                      {a?.image_url && (
+                        <button
+                          onClick={() => downloadImage(s, a.image_url!)}
+                          disabled={busyScene !== null}
+                          className="btn-ghost flex-1 px-2 py-1.5 text-xs"
+                        >
+                          {busyScene === s.id + "dl" ? "Saving…" : "⬇ PNG"}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

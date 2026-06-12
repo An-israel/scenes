@@ -101,7 +101,7 @@ export async function buildProjectZip(
 }
 
 /** Rasterize a self-contained SVG to PNG via an offscreen canvas. */
-async function svgToPng(svgBytes: ArrayBuffer, idx: number): Promise<ArrayBuffer> {
+export async function svgToPng(svgBytes: ArrayBuffer, idx: number): Promise<ArrayBuffer> {
   const blob = new Blob([svgBytes], { type: "image/svg+xml" });
   const url = URL.createObjectURL(blob);
   try {
