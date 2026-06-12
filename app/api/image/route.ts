@@ -30,8 +30,17 @@ export async function POST(req: NextRequest) {
     const apiKey = await getUserGeminiKey(user.id);
     if (!apiKey) return jsonError(NO_KEY_MESSAGE, 400);
 
+    // Project orientation; default 16:9 for rows predating migration 0002.
+    let aspect: "16:9" | "9:16" = "16:9";
+    const { data: proj } = await supabase
+      .from("projects")
+      .select("aspect_ratio")
+      .eq("id", scene.project_id)
+      .maybeSingle();
+    if (proj && (proj as any).aspect_ratio === "9:16") aspect = "9:16";
+
     const { bytes, mimeType } = await withRetry(() =>
-      generateImage(apiKey, imagePrompt(scene.image_description))
+      generateImage(apiKey, imagePrompt(scene.image_description, aspect), aspect)
     );
 
     const ext = mimeType.includes("jpeg") ? "jpg" : "png";

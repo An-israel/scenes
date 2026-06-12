@@ -10,6 +10,7 @@ export default function NewProjectPage() {
   const [title, setTitle] = useState("");
   const [script, setScript] = useState("");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
+  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">("16:9");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
@@ -50,7 +51,7 @@ export default function NewProjectPage() {
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, script, voiceId }),
+        body: JSON.stringify({ title, script, voiceId, aspectRatio }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not create project");
@@ -97,6 +98,29 @@ export default function NewProjectPage() {
         </div>
 
         <div>
+          <p className="label">Format</p>
+          <div className="mb-6 grid grid-cols-2 gap-2">
+            {(
+              [
+                ["16:9", "YouTube", "Landscape"],
+                ["9:16", "TikTok / Shorts", "Vertical"],
+              ] as const
+            ).map(([ratio, name, hint]) => (
+              <button
+                key={ratio}
+                onClick={() => setAspectRatio(ratio)}
+                className={`rounded-lg border px-3 py-3 text-left transition ${
+                  aspectRatio === ratio ? "border-gold bg-panel" : "border-edge hover:border-white/30"
+                }`}
+              >
+                <span className="block text-sm font-medium">{name}</span>
+                <span className="mt-0.5 block text-xs text-white/40">
+                  {hint} · {ratio}
+                </span>
+              </button>
+            ))}
+          </div>
+
           <p className="label">Voice</p>
           <div className="space-y-2">
             {VOICES.map((v) => (
