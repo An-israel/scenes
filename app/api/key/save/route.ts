@@ -43,6 +43,26 @@ export async function POST(req: NextRequest) {
   }
 }
 
+export async function DELETE(req: NextRequest) {
+  try {
+    const { user, error } = await requireUser();
+    if (error) return error;
+
+    const { provider } = await req.json();
+    const column = provider === "openai" ? "openai_api_key_encrypted" : "gemini_api_key_encrypted";
+    const admin = createAdminClient();
+    const { error: dbError } = await admin
+      .from("profiles")
+      .update({ [column]: null })
+      .eq("id", user.id);
+    if (dbError) return jsonError(dbError.message, 500);
+
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return handleRouteError(e);
+  }
+}
+
 export async function GET() {
   try {
     const { user, error } = await requireUser();

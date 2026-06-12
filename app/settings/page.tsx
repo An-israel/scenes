@@ -28,6 +28,26 @@ function KeyCard({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/key/save", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to remove key");
+      setMessage("Key removed.");
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove key");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -59,7 +79,13 @@ function KeyCard({
       {hasKey === null ? (
         <p className="mt-4 text-sm text-white/40">Checking…</p>
       ) : hasKey ? (
-        <p className="mt-4 text-sm text-gold">✓ A key is on file. Paste a new one below to replace it.</p>
+        <p className="mt-4 text-sm text-gold">
+          ✓ A key is on file. Paste a new one below to replace it, or{" "}
+          <button type="button" onClick={remove} disabled={busy} className="underline text-red-400">
+            remove it
+          </button>
+          .
+        </p>
       ) : (
         <p className="mt-4 text-sm text-white/40">No key saved yet.</p>
       )}
@@ -101,7 +127,7 @@ export default function SettingsPage() {
 
       <div className="space-y-6">
         <KeyCard
-          title="OpenAI API key — voices & images"
+          title="OpenAI API key — premium voices & images (optional)"
           provider="openai"
           hasKey={status ? status.openai : null}
           placeholder="sk-…"
@@ -151,7 +177,11 @@ export default function SettingsPage() {
           <h2 className="font-semibold">How the engines are chosen</h2>
           <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-white/60">
             <li>Script splitting: Gemini if you saved one (free), otherwise OpenAI.</li>
-            <li>Voices &amp; images: OpenAI whenever its key is saved, otherwise Gemini.</li>
+            <li>Voices: OpenAI if its key is saved, otherwise Gemini (free, ~15 scenes/day).</li>
+            <li>
+              Images: OpenAI if its key is saved, otherwise the free Pollinations.ai service — no
+              key or payment needed.
+            </li>
             <li>Keys are stored encrypted and only ever used server-side for your projects.</li>
           </ul>
         </div>
