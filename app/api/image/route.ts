@@ -10,6 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { withRetry } from "@/lib/gemini";
 import { openaiImage } from "@/lib/openai";
 import { pollinationsImage } from "@/lib/pollinations";
+import { generateSvgImage } from "@/lib/svg-image";
 import { imagePrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
@@ -40,8 +41,9 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (proj && (proj as any).aspect_ratio === "9:16") aspect = "9:16";
 
-    // OpenAI when its key is saved; otherwise the free keyless Pollinations service.
-    // (Google's free tier no longer allows image generation, so Gemini isn't used here.)
+    // OpenAI when its key is saved. Otherwise: try the free keyless Pollinations
+    // service, and if it refuses (rate limits / paywall changes), fall back to
+    // flat SVG art drawn by the free Gemini text model — always available.
     const prompt = imagePrompt(scene.image_description, aspect);
     let bytes: Buffer;
     let mimeType: string;
@@ -49,7 +51,13 @@ export async function POST(req: NextRequest) {
       bytes = await withRetry(() => openaiImage(keys.openai!, prompt, aspect));
       mimeType = "image/png";
     } else {
-      ({ bytes, mimeType } = await withRetry(() => pollinationsImage(prompt, aspect)));
+      try {
+        ({ bytes, mimeType } = await pollinationsImage(prompt, aspect));
+      } catch (e) {
+        if (!keys.gemini) throw e;
+        bytes = await generateSvgImage(keys.gemini, scene.image_description, aspect);
+        mimeType = "image/png";
+      }
     }
 
     const ext = mimeType.includes("jpeg") ? "jpg" : "png";

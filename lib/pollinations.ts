@@ -11,12 +11,12 @@ export async function pollinationsImage(
   prompt: string,
   aspectRatio: "16:9" | "9:16"
 ): Promise<{ bytes: Buffer; mimeType: string }> {
-  const [width, height] = aspectRatio === "9:16" ? [768, 1344] : [1344, 768];
+  const [width, height] = aspectRatio === "9:16" ? [720, 1280] : [1280, 720];
   // Random seed so regenerating a scene actually produces a different image.
   const seed = Math.floor(Math.random() * 1_000_000_000);
   const url =
     `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}` +
-    `?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}&referrer=sceneforge`;
+    `?width=${width}&height=${height}&nologo=true&seed=${seed}&referrer=sceneforge`;
 
   const res = await fetch(url, {
     headers: { "User-Agent": "SceneForge/1.0" },
