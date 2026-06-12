@@ -7,8 +7,9 @@ import {
   NO_KEY_MESSAGE,
 } from "@/lib/api-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateImage, withRetry } from "@/lib/gemini";
+import { withRetry } from "@/lib/gemini";
 import { openaiImage } from "@/lib/openai";
+import { pollinationsImage } from "@/lib/pollinations";
 import { imagePrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
@@ -29,7 +30,6 @@ export async function POST(req: NextRequest) {
     if (!scene) return jsonError("Scene not found", 404);
 
     const keys = await getUserKeys(user.id);
-    if (!keys.openai && !keys.gemini) return jsonError(NO_KEY_MESSAGE, 400);
 
     // Project orientation; default 16:9 for rows predating migration 0002.
     let aspect: "16:9" | "9:16" = "16:9";
@@ -40,6 +40,8 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (proj && (proj as any).aspect_ratio === "9:16") aspect = "9:16";
 
+    // OpenAI when its key is saved; otherwise the free keyless Pollinations service.
+    // (Google's free tier no longer allows image generation, so Gemini isn't used here.)
     const prompt = imagePrompt(scene.image_description, aspect);
     let bytes: Buffer;
     let mimeType: string;
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
       bytes = await withRetry(() => openaiImage(keys.openai!, prompt, aspect));
       mimeType = "image/png";
     } else {
-      ({ bytes, mimeType } = await withRetry(() => generateImage(keys.gemini!, prompt, aspect)));
+      ({ bytes, mimeType } = await withRetry(() => pollinationsImage(prompt, aspect)));
     }
 
     const ext = mimeType.includes("jpeg") ? "jpg" : "png";
