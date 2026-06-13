@@ -89,12 +89,17 @@ export async function analyzeYouTube(apiKey: string, youtubeUrl: string, prompt:
   const data = await callModel(apiKey, TEXT_MODEL, {
     contents: [
       {
-        parts: [{ fileData: { fileUri: youtubeUrl } }, { text: prompt }],
+        // Low fps sampling: clip-finding cares about what's SAID, not frame
+        // detail, so 0.5 fps roughly halves video tokens for longer videos.
+        parts: [{ fileData: { fileUri: youtubeUrl }, videoMetadata: { fps: 0.5 } }, { text: prompt }],
       },
     ],
     generationConfig: {
       responseMimeType: "application/json",
       temperature: 0.5,
+      // Low media resolution ≈ 4x fewer tokens per second of video, raising the
+      // length ceiling from ~1h to ~4h+ within Gemini's 1,048,576-token window.
+      mediaResolution: "MEDIA_RESOLUTION_LOW",
     },
   });
   const text = data?.candidates?.[0]?.content?.parts
