@@ -47,6 +47,36 @@ unreadable text, NO watermark.
 SCENE TO DRAW: ${imageDescription}`;
 }
 
+export function clipFinderPrompt(count: number, minSec: number, maxSec: number): string {
+  return `You are an elite short-form video editor who finds viral clips inside long YouTube videos for TikTok, Reels and Shorts.
+
+Watch the video and select the ${count} MOST powerful, scroll-stopping moments to cut into standalone vertical clips.
+
+What makes a great clip:
+- It stands ALONE without the rest of the video. A stranger scrolling should get it instantly.
+- It opens on a strong HOOK in the first 1-2 seconds — a bold claim, a question, a surprising statement, the start of a story, or an emotional spike.
+- It pays off: a punchline, a revelation, a satisfying conclusion, a counterintuitive fact, or a quotable line.
+- Prefer self-contained thoughts. Do NOT cut mid-sentence at the start or end — begin and end on natural speech boundaries.
+- Each clip must be between ${minSec} and ${maxSec} seconds long.
+- Spread clips across the WHOLE video (beginning, middle, end). Do not bunch them together or overlap them.
+- Rank them strongest-first (clip 1 = the single best moment).
+
+Use the video's REAL spoken content. Timestamps must be accurate to the actual video.
+
+Return STRICT JSON only, no markdown:
+{"clips":[{
+  "start":"M:SS",
+  "end":"M:SS",
+  "start_seconds": <integer seconds from video start>,
+  "end_seconds": <integer seconds from video start>,
+  "title": "<scroll-stopping caption/title for the short, max ~70 chars>",
+  "reason": "<one sentence: why this exact moment grabs and holds attention>",
+  "transcript": "<the words actually spoken in this segment, verbatim>"
+}]}
+
+Give exactly ${count} clips if the video is long enough; fewer only if the video is too short.`;
+}
+
 export function ttsPrompt(voiceStyle: string, sceneText: string): string {
   return `Read the following narration in a ${voiceStyle} tone. Natural pace, clear diction. Script begins now: "${sceneText}"`;
 }
