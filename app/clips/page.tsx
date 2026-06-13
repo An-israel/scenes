@@ -28,6 +28,39 @@ export default function ClipsPage() {
   const [clips, setClips] = useState<Clip[] | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [dlBusy, setDlBusy] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+  const [dlReady, setDlReady] = useState<string | null>(null);
+
+  async function downloadVideo(quality: "720" | "1080") {
+    if (!videoId) return;
+    setDlBusy(quality);
+    setDlError(null);
+    setDlReady(null);
+    try {
+      const res = await fetch("/api/clips/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, quality }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Download failed");
+      // The relay streams the file with an attachment header, so opening the
+      // link downloads it directly (the heavy work never touches our server).
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setDlReady(quality);
+    } catch (e) {
+      setDlError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDlBusy(null);
+    }
+  }
 
   async function analyze(e: React.FormEvent) {
     e.preventDefault();
@@ -154,6 +187,45 @@ export default function ClipsPage() {
         </div>
       )}
 
+      {videoId && (
+        <div className="card mt-6">
+          <h2 className="font-semibold">Download the source video</h2>
+          <p className="mt-1 text-sm text-white/50">
+            Grab the full video, then cut it in CapCut using the timestamps below. 1080p takes a bit
+            longer (audio + video are merged for you).
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={() => downloadVideo("720")}
+              disabled={dlBusy !== null}
+              className="btn-ghost"
+            >
+              {dlBusy === "720" ? "Preparing 720p…" : "⬇ Download 720p"}
+            </button>
+            <button
+              onClick={() => downloadVideo("1080")}
+              disabled={dlBusy !== null}
+              className="btn-gold"
+            >
+              {dlBusy === "1080" ? "Preparing 1080p…" : "⬇ Download 1080p"}
+            </button>
+          </div>
+          {dlBusy && (
+            <p className="mt-3 text-xs text-white/40">
+              Fetching and merging on a free relay — this can take 10–40 seconds. Your download opens
+              in a new tab when ready.
+            </p>
+          )}
+          {dlReady && (
+            <p className="mt-3 text-sm text-gold">
+              {dlReady}p download started in a new tab. If nothing happened, allow pop-ups for this
+              site and try again.
+            </p>
+          )}
+          {dlError && <p className="mt-3 text-sm text-red-400">{dlError}</p>}
+        </div>
+      )}
+
       {clips && (
         <div className="mt-8">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -211,8 +283,7 @@ export default function ClipsPage() {
           </div>
 
           <p className="mt-6 text-center text-xs text-white/30">
-            Take these timestamps into CapCut with the source video to cut your shorts. In-app
-            download is coming next.
+            Download the video above, then cut to these timestamps in CapCut to make your shorts.
           </p>
         </div>
       )}
