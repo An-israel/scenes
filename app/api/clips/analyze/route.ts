@@ -10,7 +10,8 @@ import { analyzeYouTube, withRetry } from "@/lib/gemini";
 import { clipFinderPrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Long videos take longer to analyze; honored on Vercel Pro (Hobby caps at 60s).
+export const maxDuration = 300;
 
 interface Clip {
   start: string;
@@ -74,6 +75,12 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       // Common, user-fixable failure modes get a friendlier message.
       const msg = e?.message ?? "";
+      if (/token count exceeds|1048576|exceeds the maximum number of tokens/i.test(msg)) {
+        return jsonError(
+          "This video is too long for the analyzer (roughly 4+ hours of footage). Try a shorter video, or clip out the section you care about first.",
+          422
+        );
+      }
       if (/quota|rate|429/i.test(msg)) {
         return jsonError("Daily free Gemini limit reached for video analysis — try again tomorrow.", 429);
       }
