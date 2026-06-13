@@ -82,6 +82,28 @@ export async function generateText(apiKey: string, prompt: string): Promise<stri
   return text;
 }
 
+/** Analyze a public YouTube video directly — Gemini accepts a YouTube URL as
+ *  video input (it's a Google product), so no transcript scraping is needed.
+ *  Returns the model's JSON text. Video processing is slower than plain text. */
+export async function analyzeYouTube(apiKey: string, youtubeUrl: string, prompt: string): Promise<string> {
+  const data = await callModel(apiKey, TEXT_MODEL, {
+    contents: [
+      {
+        parts: [{ fileData: { fileUri: youtubeUrl } }, { text: prompt }],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.5,
+    },
+  });
+  const text = data?.candidates?.[0]?.content?.parts
+    ?.map((p: any) => p.text ?? "")
+    .join("");
+  if (!text) throw new GeminiError("Gemini returned an empty response — the video may be private, age-restricted, or too long.", 502);
+  return text;
+}
+
 /** Single-speaker TTS. Returns raw PCM plus its mime type (carries sample rate). */
 export async function generateSpeech(
   apiKey: string,
