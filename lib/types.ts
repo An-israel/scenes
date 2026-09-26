@@ -8,7 +8,9 @@ export interface Project {
   title: string;
   script: string;
   voice_id: string;
-  aspect_ratio?: AspectRatio; // missing on rows created before migration 0002 → treat as 16:9
+  aspect_ratio?: AspectRatio;
+  style?: string;
+  setting?: string | null;
   status: ProjectStatus;
   total_duration_ms: number | null;
   zip_path: string | null;
@@ -23,12 +25,21 @@ export interface Scene {
   idx: number;
   text: string;
   image_description: string;
+  characters?: string[];
   audio_path: string | null;
   image_path: string | null;
   duration_ms: number | null;
   start_ms: number | null;
   status: SceneStatus;
-  chunk_idx?: number | null;
+}
+
+export interface Character {
+  id: string;
+  project_id: string;
+  idx: number;
+  name: string;
+  look: string;
+  sheet_path: string | null;
 }
 
 export interface SceneAssetUrls {
@@ -39,4 +50,12 @@ export interface SceneAssetUrls {
   text: string;
   audio_url: string | null;
   image_url: string | null;
+}
+
+export interface CharacterAsset {
+  id: string;
+  idx: number;
+  name: string;
+  look: string;
+  sheet_url: string | null;
 }

@@ -1,23 +1,37 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { buildProjectZip, triggerDownload, formatClock, svgToPng, type ZipProgress } from "@/lib/client/zip";
-import type { Project, Scene, SceneAssetUrls } from "@/lib/types";
+import { buildProjectVideo, canExportVideo, type VideoProgress } from "@/lib/client/video";
+import { extOfUrl, mimeForExt } from "@/lib/media";
+import { getStyle } from "@/lib/styles";
+import { getVoice } from "@/lib/voices";
+import type { CharacterAsset, Project, Scene, SceneAssetUrls } from "@/lib/types";
 
 interface Props {
   initialProject: Project;
   initialScenes: Scene[];
 }
 
-type Phase = "idle" | "splitting" | "generating" | "finalizing" | "zipping" | "done" | "error";
+type Phase = "idle" | "storyboard" | "cast" | "shots" | "finalizing" | "zipping" | "rendering" | "done" | "error";
 
-const BACKOFF_MS = [2000, 4000, 8000];
+interface AssetsResponse {
+  assets: SceneAssetUrls[];
+  characters: CharacterAsset[];
+  zip_url: string | null;
+  project: Project;
+}
 
-async function callApi<T = any>(url: string, body?: unknown): Promise<T> {
+const BACKOFF_MS = [3000, 6000, 12000];
+// Signed URLs last an hour; refresh well before that while the page is open.
+const REFRESH_EVERY_MS = 40 * 60 * 1000;
+
+async function callApi<T = any>(url: string, body?: unknown, method?: string): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, {
-      method: body !== undefined ? "POST" : "GET",
+      method: method ?? (body !== undefined ? "POST" : "GET"),
       headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -31,26 +45,43 @@ async function callApi<T = any>(url: string, body?: unknown): Promise<T> {
   }
 }
 
+const PHASE_LABEL: Record<Phase, string> = {
+  idle: "",
+  storyboard: "Writing the storyboard",
+  cast: "Designing the characters",
+  shots: "Drawing and voicing shots",
+  finalizing: "Setting the timing",
+  zipping: "Packing your download",
+  rendering: "Rendering your video",
+  done: "",
+  error: "",
+};
+
 export default function ProjectFactory({ initialProject, initialScenes }: Props) {
+  const router = useRouter();
   const [project, setProject] = useState(initialProject);
   const [scenes, setScenes] = useState<Scene[]>(initialScenes);
   const [assets, setAssets] = useState<SceneAssetUrls[]>([]);
+  const [cast, setCast] = useState<CharacterAsset[]>([]);
   const [zipUrl, setZipUrl] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusLine, setStatusLine] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [busyScene, setBusyScene] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(initialProject.title);
+  const [captions, setCaptions] = useState(true);
+  const [videoSupported, setVideoSupported] = useState(true);
   const runningRef = useRef(false);
-
   const scenesRef = useRef(scenes);
   scenesRef.current = scenes;
 
-  const refreshAssets = useCallback(async () => {
+  const refreshAssets = useCallback(async (): Promise<AssetsResponse | null> => {
     try {
-      const data = await callApi<{ assets: SceneAssetUrls[]; zip_url: string | null; project: Project }>(
-        `/api/projects/${initialProject.id}/assets`
-      );
+      const data = await callApi<AssetsResponse>(`/api/projects/${initialProject.id}/assets`);
       setAssets(data.assets);
+      setCast(data.characters);
       setZipUrl(data.zip_url);
       setProject(data.project);
       return data;
@@ -63,170 +94,159 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
     setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }, []);
 
-  /** Generate missing audio + image for one scene (parallel within the scene).
-   *  Voicing fills the scene's whole audio chunk, so the returned patches can
-   *  cover many beats — the run loop uses them to skip already-voiced ones. */
-  const processScene = useCallback(
-    async (scene: Scene, position: number, total: number): Promise<Array<{ id: string; patch: Partial<Scene> }>> => {
-      const patches: Array<{ id: string; patch: Partial<Scene> }> = [];
-      const jobs: Promise<void>[] = [];
-      if (!scene.audio_path) {
-        setStatusLine(`Scene ${position}/${total}: voicing…`);
-        jobs.push(
-          callApi("/api/tts", { sceneId: scene.id }).then((d: any) => {
-            const updatedScenes =
-              d.scenes ?? [{ id: scene.id, audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }];
-            for (const u of updatedScenes) {
-              const patch = { audio_path: u.audio_path, duration_ms: u.duration_ms, status: u.status };
-              updateScene(u.id, patch);
-              patches.push({ id: u.id, patch });
-            }
-          })
-        );
-      }
-      if (!scene.image_path) {
-        setStatusLine(`Scene ${position}/${total}: ${scene.audio_path ? "drawing…" : "voicing + drawing…"}`);
-        jobs.push(
-          callApi("/api/image", { sceneId: scene.id }).then((d: any) => {
-            const patch = { image_path: d.image_path, status: d.status };
-            updateScene(scene.id, patch);
-            patches.push({ id: scene.id, patch });
-          })
-        );
-      }
-      await Promise.all(jobs);
-      return patches;
-    },
-    [updateScene]
-  );
-
   const run = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
     setError(null);
+    setNotice(null);
     try {
-      // 1. Split (idempotent — returns existing scenes on resume).
-      let currentScenes = scenesRef.current;
-      if (currentScenes.length === 0) {
-        setPhase("splitting");
-        setStatusLine("Splitting script into scenes…");
-        const data = await callApi<{ scenes: Scene[] }>("/api/split", { projectId: project.id });
-        currentScenes = data.scenes;
-        setScenes(currentScenes);
+      // 1. Storyboard (idempotent — returns the existing one on resume).
+      let local = scenesRef.current;
+      if (local.length === 0) {
+        setPhase("storyboard");
+        setStatusLine("Splitting your story into shots and finding the characters…");
+        const data = await callApi<{ scenes: Scene[]; title?: string }>("/api/split", { projectId: project.id });
+        local = data.scenes;
+        setScenes(local);
+        if (data.title) {
+          setProject((p) => ({ ...p, title: data.title! }));
+          setTitleDraft(data.title);
+        }
       }
 
-      // 2. Per-scene generation, sequential across scenes (free-tier friendly).
-      // Track completions locally — React state lags inside this async loop,
-      // and a chunked TTS call completes several beats at once.
-      setPhase("generating");
-      let local = scenesRef.current.length === currentScenes.length ? [...scenesRef.current] : [...currentScenes];
+      // 2. Character sheets — every shot is drawn against these.
+      let data = await refreshAssets();
+      const missingSheets = (data?.characters ?? []).filter((c) => !c.sheet_url);
+      if (missingSheets.length > 0) setPhase("cast");
+      for (let i = 0; i < missingSheets.length; i++) {
+        setStatusLine(`Character ${i + 1} of ${missingSheets.length}: ${missingSheets[i].name}`);
+        await callApi("/api/character", { characterId: missingSheets[i].id });
+        data = await refreshAssets();
+      }
+
+      // 3. Shots, one at a time: voice and image in parallel within a shot.
+      setPhase("shots");
       const total = local.length;
       for (let i = 0; i < total; i++) {
-        const scene = local[i];
-        if (scene.audio_path && scene.image_path) continue;
-        const patches = await processScene(scene, i + 1, total);
-        for (const p of patches) {
-          local = local.map((s) => (s.id === p.id ? { ...s, ...p.patch } : s));
+        const shot = scenesRef.current.find((s) => s.id === local[i].id) ?? local[i];
+        if (shot.audio_path && shot.image_path) continue;
+        setStatusLine(`Shot ${i + 1} of ${total}`);
+        const jobs: Promise<void>[] = [];
+        if (!shot.audio_path) {
+          jobs.push(
+            callApi("/api/tts", { sceneId: shot.id }).then((d: any) =>
+              updateScene(shot.id, { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status })
+            )
+          );
         }
-        refreshAssets(); // fire-and-forget thumbnail refresh
+        if (!shot.image_path) {
+          jobs.push(
+            callApi("/api/image", { sceneId: shot.id }).then((d: any) =>
+              updateScene(shot.id, { image_path: d.image_path, status: d.status })
+            )
+          );
+        }
+        await Promise.all(jobs);
+        refreshAssets();
       }
 
-      // 3. Finalize: exact timestamps from real durations.
+      // 4. Timing from the real audio lengths.
       setPhase("finalizing");
-      setStatusLine("Computing timestamps…");
+      setStatusLine("Lining every image up with its words…");
       await callApi("/api/finalize", { projectId: project.id });
       await refreshAssets();
+      router.refresh();
       setPhase("done");
       setStatusLine("");
     } catch (e) {
       setPhase("error");
       setError(e instanceof Error ? e.message : "Generation failed");
+      refreshAssets();
     } finally {
       runningRef.current = false;
     }
-  }, [project.id, processScene, refreshAssets]);
+  }, [project.id, refreshAssets, updateScene, router]);
 
-  // Auto-start fresh projects; otherwise load thumbnails for whatever exists.
   useEffect(() => {
     refreshAssets().then(() => {
-      if (initialProject.status === "draft" || initialProject.status === "splitting") {
-        run();
-      } else if (initialProject.status === "done") {
-        setPhase("done");
-      }
+      if (initialProject.status === "draft" || initialProject.status === "splitting") run();
+      else if (initialProject.status === "done") setPhase("done");
     });
+    setVideoSupported(canExportVideo());
+    const timer = setInterval(refreshAssets, REFRESH_EVERY_MS);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const incomplete = scenes.filter((s) => !s.audio_path || !s.image_path).length;
   const completed = scenes.length - incomplete;
-  const isRunning = phase === "splitting" || phase === "generating" || phase === "finalizing";
-  const canResume =
-    !isRunning && phase !== "zipping" && (scenes.length === 0 || incomplete > 0);
+  const isRunning = phase === "storyboard" || phase === "cast" || phase === "shots" || phase === "finalizing";
+  const exporting = phase === "zipping" || phase === "rendering";
+  const canResume = !isRunning && !exporting && (scenes.length === 0 || incomplete > 0 || cast.some((c) => !c.sheet_url));
+  const isReady = project.status === "done" && incomplete === 0 && scenes.length > 0;
 
-  async function regenerate(scene: Scene, kind: "audio" | "image") {
-    setBusyScene(scene.id + kind);
+  async function withBusy(key: string, fn: () => Promise<void>) {
+    setBusy(key);
     setError(null);
+    setNotice(null);
     try {
-      const d: any = await callApi(kind === "audio" ? "/api/tts" : "/api/image", { sceneId: scene.id });
-      if (kind === "audio" && d.scenes) {
-        for (const u of d.scenes) {
-          updateScene(u.id, { audio_path: u.audio_path, duration_ms: u.duration_ms, status: u.status });
-        }
-      } else {
-        updateScene(
-          scene.id,
-          kind === "audio"
-            ? { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }
-            : { image_path: d.image_path, status: d.status }
-        );
-      }
-      // Re-finalize so timestamps stay exact after an audio regen.
-      await callApi("/api/finalize", { projectId: project.id }).catch(() => {});
-      await refreshAssets();
+      await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Regenerate failed");
+      setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
-      setBusyScene(null);
+      setBusy(null);
     }
   }
 
-  async function downloadImage(scene: Scene, imageUrl: string) {
-    setBusyScene(scene.id + "dl");
-    setError(null);
-    try {
+  const redoShot = (scene: Scene, kind: "audio" | "image") =>
+    withBusy(scene.id + kind, async () => {
+      const d: any = await callApi(kind === "audio" ? "/api/tts" : "/api/image", { sceneId: scene.id });
+      updateScene(
+        scene.id,
+        kind === "audio"
+          ? { audio_path: d.audio_path, duration_ms: d.duration_ms, status: d.status }
+          : { image_path: d.image_path, status: d.status }
+      );
+      // A new voice take changes the length, so re-time the whole short.
+      if (kind === "audio" && scenesRef.current.every((s) => s.audio_path && s.image_path)) {
+        await callApi("/api/finalize", { projectId: project.id });
+      }
+      await refreshAssets();
+    });
+
+  const redoCharacter = (c: CharacterAsset) =>
+    withBusy("char" + c.id, async () => {
+      await callApi("/api/character", { characterId: c.id });
+      await refreshAssets();
+      setNotice(`${c.name} was redesigned. Redraw the shots they appear in to match.`);
+    });
+
+  const downloadImage = (scene: Scene, imageUrl: string) =>
+    withBusy(scene.id + "dl", async () => {
       const res = await fetch(imageUrl);
-      if (!res.ok) throw new Error(`Could not download scene ${scene.idx} image`);
+      if (!res.ok) throw new Error(`Could not download shot ${scene.idx}`);
       let bytes = await res.arrayBuffer();
-      let ext = imageUrl.includes(".svg") ? "svg" : imageUrl.includes(".jpg") ? "jpg" : "png";
+      let ext = extOfUrl(imageUrl);
       if (ext === "svg") {
         bytes = await svgToPng(bytes, scene.idx);
         ext = "png";
       }
-      triggerDownload(
-        new Blob([bytes], { type: ext === "jpg" ? "image/jpeg" : "image/png" }),
-        `scene_${String(scene.idx).padStart(3, "0")}.${ext}`
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Image download failed");
-    } finally {
-      setBusyScene(null);
-    }
-  }
+      triggerDownload(new Blob([bytes], { type: mimeForExt(ext) }), `shot_${String(scene.idx).padStart(3, "0")}.${ext}`);
+    });
 
   async function downloadZip() {
     setPhase("zipping");
     setError(null);
+    setNotice(null);
     try {
       const data = await refreshAssets();
-      if (!data) throw new Error("Could not load assets");
-      const blob = await buildProjectZip(data.assets, (p: ZipProgress) =>
-        setStatusLine(p.total ? `${p.step} ${p.current}/${p.total}…` : `${p.step}…`)
+      if (!data) throw new Error("Could not load the project files");
+      const blob = await buildProjectZip(data.assets, data.characters, (p: ZipProgress) =>
+        setStatusLine(p.total ? `${p.step} ${p.current}/${p.total}` : p.step)
       );
-      triggerDownload(blob, `${project.title.replace(/[^\w-]+/g, "_") || "sceneforge"}.zip`);
+      triggerDownload(blob, `${project.title.replace(/[^\w-]+/g, "_") || "scenes"}.zip`);
 
-      // Upload for later re-download (direct to Storage — RLS scopes the path).
-      setStatusLine("Saving ZIP to your library…");
+      setStatusLine("Saving a copy to your library…");
       const supabase = createClient();
       const {
         data: { user },
@@ -236,179 +256,366 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
         const { error: upErr } = await supabase.storage
           .from("assets")
           .upload(zipPath, blob, { contentType: "application/zip", upsert: true });
-        if (!upErr) {
+        if (upErr) {
+          setNotice(`Downloaded — but saving a copy to your library failed: ${upErr.message}`);
+        } else {
           await callApi(`/api/projects/${project.id}/zip-path`, { zipPath });
           await refreshAssets();
         }
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't build the download");
+    } finally {
       setPhase("done");
       setStatusLine("");
-    } catch (e) {
-      setPhase("done");
-      setError(e instanceof Error ? e.message : "ZIP build failed");
     }
   }
 
+  async function downloadVideo() {
+    setPhase("rendering");
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await refreshAssets();
+      if (!data) throw new Error("Could not load the project files");
+      const blob = await buildProjectVideo(data.assets, { vertical: isVertical, captions }, (p: VideoProgress) =>
+        setStatusLine(p.total ? `${p.step} ${p.current}/${p.total}` : p.step)
+      );
+      triggerDownload(blob, `${project.title.replace(/[^\w-]+/g, "_") || "scenes"}.mp4`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't render the video");
+    } finally {
+      setPhase("done");
+      setStatusLine("");
+    }
+  }
+
+  const saveTitle = () =>
+    withBusy("title", async () => {
+      const d = await callApi<{ project: { title: string } }>(`/api/projects/${project.id}`, { title: titleDraft }, "PATCH");
+      setProject((p) => ({ ...p, title: d.project.title }));
+      setEditingTitle(false);
+    });
+
+  const deleteProject = () => {
+    if (!window.confirm(`Delete "${project.title}" and all of its files? This can't be undone.`)) return;
+    withBusy("delete", async () => {
+      await callApi(`/api/projects/${project.id}`, undefined, "DELETE");
+      router.push("/dashboard");
+      router.refresh();
+    });
+  };
+
   const assetByScene = new Map(assets.map((a) => [a.id, a]));
-  const isVertical = project.aspect_ratio === "9:16";
-  const frameClass = isVertical ? "aspect-[9/16] mx-auto max-w-[220px]" : "aspect-video";
+  const isVertical = project.aspect_ratio !== "16:9";
+  const frameClass = isVertical ? "aspect-[9/16]" : "aspect-video";
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{project.title}</h1>
-          <p className="mt-1 text-sm text-white/40">
-            Voice: {project.voice_id}
-            {` · ${isVertical ? "9:16 vertical" : "16:9 landscape"}`}
-            {project.total_duration_ms ? ` · ${formatClock(project.total_duration_ms)} total` : ""}
-            {scenes.length > 0 ? ` · ${scenes.length} scenes` : ""}
-          </p>
-        </div>
-        <div className="flex gap-3">
-          {canResume && (
-            <button onClick={run} className="btn-ghost">
-              {scenes.length === 0 ? "Start generation" : `Resume (${incomplete} left)`}
+      {/* Header */}
+      <div className="mb-10 border-b border-line pb-10">
+        <p className="label mb-4">
+          {getStyle(project.style).label} · {isVertical ? "9:16" : "16:9"} · Narrated by {getVoice(project.voice_id).label}
+        </p>
+        {editingTitle ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              className="input max-w-xl text-2xl font-semibold"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveTitle()}
+              autoFocus
+            />
+            <button onClick={saveTitle} disabled={busy !== null} className="btn-quiet">
+              Save
             </button>
-          )}
-          {project.status === "done" && incomplete === 0 && (
-            <button onClick={downloadZip} disabled={phase === "zipping"} className="btn-gold">
-              {phase === "zipping" ? "Building…" : "⬇ Download ZIP"}
+            <button onClick={() => setEditingTitle(false)} className="btn-quiet">
+              Cancel
             </button>
-          )}
-          {zipUrl && phase !== "zipping" && (
-            <a href={zipUrl} className="btn-ghost" download>
-              Re-download last ZIP
-            </a>
-          )}
+          </div>
+        ) : (
+          <h1 className="display text-4xl sm:text-6xl">{project.title}</h1>
+        )}
+
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-6">
+          <div className="flex flex-wrap gap-8 font-mono text-sm text-forest-soft">
+            <span>
+              <span className="label mr-2">Length</span>
+              {project.total_duration_ms ? formatClock(project.total_duration_ms) : "—"}
+            </span>
+            <span>
+              <span className="label mr-2">Shots</span>
+              {scenes.length || "—"}
+            </span>
+            <span>
+              <span className="label mr-2">Cast</span>
+              {cast.length || "—"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {canResume && (
+              <button onClick={run} className="btn-outline">
+                {scenes.length === 0 ? "Start" : `Resume · ${incomplete} left`}
+              </button>
+            )}
+            {isReady && videoSupported && (
+              <button onClick={downloadVideo} disabled={exporting} className="btn-primary">
+                {phase === "rendering" ? "Rendering…" : "Download MP4"}
+              </button>
+            )}
+            {isReady && (
+              <button onClick={downloadZip} disabled={exporting} className="btn-outline">
+                {phase === "zipping" ? "Packing…" : "Download ZIP"}
+              </button>
+            )}
+            {zipUrl && !exporting && (
+              <a href={zipUrl} className="btn-outline">
+                Last download
+              </a>
+            )}
+          </div>
         </div>
       </div>
 
-      {(isRunning || phase === "zipping") && (
-        <div className="card mb-6">
-          <div className="flex items-center gap-3">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-gold" />
-            <p className="text-sm">{statusLine || "Working…"}</p>
+      {/* Progress */}
+      {isReady && videoSupported && (
+        <div className="-mt-4 mb-10 flex justify-end">
+          <label className="flex cursor-pointer items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-forest-soft">
+            <input
+              type="checkbox"
+              checked={captions}
+              onChange={(e) => setCaptions(e.target.checked)}
+              disabled={exporting}
+              className="h-4 w-4 accent-clay"
+            />
+            Captions in video
+          </label>
+        </div>
+      )}
+
+      {(isRunning || exporting) && (
+        <div className="mb-10 rounded-xl border border-line bg-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <p className="font-semibold">{PHASE_LABEL[phase]}</p>
+            <p className="font-mono text-sm text-forest-soft">{statusLine || "Working…"}</p>
           </div>
-          {scenes.length > 0 && phase === "generating" && (
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-edge">
-              <div
-                className="h-full bg-gold transition-all"
-                style={{ width: `${(completed / scenes.length) * 100}%` }}
-              />
-            </div>
-          )}
+          <div className="mt-5 h-1 overflow-hidden rounded-full bg-line">
+            <div
+              className="h-full bg-clay transition-all duration-500"
+              style={{
+                width: `${
+                  exporting
+                    ? exportPercent(statusLine)
+                    : phase === "storyboard"
+                      ? 6
+                      : phase === "cast"
+                        ? 14
+                        : scenes.length
+                          ? 14 + (completed / scenes.length) * 84
+                          : 10
+                }%`,
+              }}
+            />
+          </div>
         </div>
       )}
 
       {error && (
-        <div className="card mb-6 border-red-900 bg-red-950/40">
-          <p className="text-sm text-red-300">{error}</p>
+        <div className="mb-10 rounded-xl border border-clay/40 bg-clay-tint p-6">
+          <p className="text-clay-dark">{error}</p>
           {canResume && (
-            <button onClick={run} className="btn-ghost mt-3 text-xs">
-              Try resume
+            <button onClick={run} className="btn-quiet mt-4">
+              Try again
             </button>
           )}
         </div>
       )}
+      {notice && (
+        <div className="mb-10 rounded-xl border border-line bg-ochre-tint p-6">
+          <p>{notice}</p>
+        </div>
+      )}
 
-      {/* Timeline strip when done */}
-      {project.status === "done" && assets.length > 0 && (
-        <div className="mb-6 overflow-x-auto">
-          <div className="flex gap-1 pb-2">
-            {assets.map((a) => (
-              <div key={a.id} className="shrink-0">
-                {a.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={a.image_url}
-                    alt={`Scene ${a.idx}`}
-                    className="h-16 rounded border border-edge"
-                  />
-                ) : (
-                  <div className="h-16 w-28 rounded border border-edge bg-panel" />
-                )}
-                <p className="mt-1 text-center text-[10px] text-white/40">
-                  {a.start_ms != null ? formatClock(a.start_ms) : "—"}
-                </p>
+      {/* Preview */}
+      {isReady && assets.every((a) => a.image_url && a.audio_url) && (
+        <Preview assets={assets} vertical={isVertical} />
+      )}
+
+      {/* Cast */}
+      {cast.length > 0 && (
+        <section className="mb-16">
+          <p className="label mb-6">Cast — {String(cast.length).padStart(2, "0")}</p>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {cast.map((c) => (
+              <div key={c.id} className="overflow-hidden rounded-xl border border-line bg-card">
+                <div className="aspect-video bg-forest-tint">
+                  {c.sheet_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.sheet_url} alt={`${c.name} reference sheet`} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center font-mono text-xs text-forest-mute">
+                      {phase === "cast" ? "Designing…" : "Not drawn yet"}
+                    </div>
+                  )}
+                </div>
+                <div className="p-5">
+                  <h3 className="font-semibold">{c.name}</h3>
+                  <p className="mt-1 line-clamp-3 text-sm text-forest-soft">{c.look}</p>
+                  {!isRunning && (
+                    <button onClick={() => redoCharacter(c)} disabled={busy !== null} className="btn-quiet mt-4">
+                      {busy === "char" + c.id ? "Redrawing" : "Redraw"}
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Scene grid */}
+      {/* Shots */}
       {scenes.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {scenes.map((s, i) => {
-            const a = assetByScene.get(s.id);
-            // Beats in one audio chunk share a file — show player/regen on the first only.
-            const chunkLead = !s.audio_path || i === 0 || scenes[i - 1].audio_path !== s.audio_path;
-            return (
-              <div key={s.id} className="card p-0 overflow-hidden">
-                <div className={`${frameClass} bg-ink`}>
-                  {a?.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={a.image_url} alt={`Scene ${s.idx}`} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-white/20">
-                      {s.image_path ? "…" : isRunning ? "waiting to draw…" : "no image yet"}
-                    </div>
-                  )}
-                </div>
-                <div className="p-4">
-                  <div className="flex items-center justify-between text-xs text-white/40">
-                    <span className="font-semibold text-gold">#{s.idx}</span>
-                    <span>
-                      {s.start_ms != null && `${formatClock(s.start_ms)} · `}
-                      {s.duration_ms != null ? `${(s.duration_ms / 1000).toFixed(1)}s` : "no audio yet"}
-                    </span>
+        <section>
+          <p className="label mb-6">Shots — {String(scenes.length).padStart(2, "0")}</p>
+          <div className={`grid gap-5 ${isVertical ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" : "sm:grid-cols-2 lg:grid-cols-3"}`}>
+            {scenes.map((s) => {
+              const a = assetByScene.get(s.id);
+              return (
+                <div key={s.id} className="flex flex-col overflow-hidden rounded-xl border border-line bg-card">
+                  <div className={`${frameClass} bg-forest-tint`}>
+                    {a?.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.image_url} alt={`Shot ${s.idx}`} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center font-mono text-xs text-forest-mute">
+                        {s.image_path ? "Loading" : isRunning ? "Queued" : "No image yet"}
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-2 line-clamp-3 text-sm text-white/70">{s.text}</p>
-                  {a?.audio_url && chunkLead && (
-                    <audio src={a.audio_url} controls preload="none" className="mt-3 h-8 w-full" />
-                  )}
-                  {!isRunning && (
-                    <div className="mt-3 flex gap-2">
-                      {chunkLead && (
-                        <button
-                          onClick={() => regenerate(s, "audio")}
-                          disabled={busyScene !== null}
-                          className="btn-ghost flex-1 px-2 py-1.5 text-xs"
-                        >
-                          {busyScene === s.id + "audio" ? "Voicing…" : "↻ Audio"}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => regenerate(s, "image")}
-                        disabled={busyScene !== null}
-                        className="btn-ghost flex-1 px-2 py-1.5 text-xs"
-                      >
-                        {busyScene === s.id + "image" ? "Drawing…" : "↻ Image"}
-                      </button>
-                      {a?.image_url && (
-                        <button
-                          onClick={() => downloadImage(s, a.image_url!)}
-                          disabled={busyScene !== null}
-                          className="btn-ghost flex-1 px-2 py-1.5 text-xs"
-                        >
-                          {busyScene === s.id + "dl" ? "Saving…" : "⬇ PNG"}
-                        </button>
-                      )}
+                  <div className="flex flex-1 flex-col p-4">
+                    <div className="flex items-center justify-between font-mono text-[11px] text-forest-mute">
+                      <span className="text-clay">{String(s.idx).padStart(2, "0")}</span>
+                      <span>
+                        {s.start_ms != null && `${formatClock(s.start_ms)} · `}
+                        {s.duration_ms != null ? `${(s.duration_ms / 1000).toFixed(1)}s` : "—"}
+                      </span>
                     </div>
-                  )}
+                    <p className="mt-3 flex-1 text-[15px] leading-snug">{s.text}</p>
+                    {a?.audio_url && <audio src={a.audio_url} controls preload="none" className="mt-3 h-8 w-full" />}
+                    {!isRunning && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button onClick={() => redoShot(s, "image")} disabled={busy !== null} className="btn-quiet">
+                          {busy === s.id + "image" ? "Drawing" : "Redraw"}
+                        </button>
+                        <button onClick={() => redoShot(s, "audio")} disabled={busy !== null} className="btn-quiet">
+                          {busy === s.id + "audio" ? "Voicing" : "Re-voice"}
+                        </button>
+                        {a?.image_url && (
+                          <button onClick={() => downloadImage(s, a.image_url!)} disabled={busy !== null} className="btn-quiet">
+                            {busy === s.id + "dl" ? "Saving" : "Save"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </section>
       ) : (
         !isRunning && (
-          <div className="card py-12 text-center text-white/40">
-            Script saved. Hit <span className="text-gold">Start generation</span> to forge your scenes.
+          <div className="rounded-xl border border-line bg-card px-8 py-16 text-center">
+            <p className="lede">Your story is saved. Press Start to storyboard it.</p>
           </div>
         )
       )}
+
+      {/* Danger zone */}
+      <div className="mt-20 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-8">
+        <div className="flex gap-3">
+          {!editingTitle && (
+            <button onClick={() => setEditingTitle(true)} className="btn-quiet">
+              Rename
+            </button>
+          )}
+        </div>
+        <button onClick={deleteProject} disabled={busy !== null || isRunning} className="btn-quiet hover:border-clay hover:text-clay">
+          {busy === "delete" ? "Deleting" : "Delete project"}
+        </button>
+      </div>
     </div>
+  );
+}
+
+/** Rough progress for exports, read from the "Step n/total" status line. */
+function exportPercent(status: string): number {
+  const m = /(\d+)\/(\d+)/.exec(status);
+  if (!m) return status ? 92 : 4;
+  const frac = Number(m[1]) / Number(m[2]);
+  return /render/i.test(status) ? 25 + frac * 65 : 4 + frac * 20;
+}
+
+/** Plays the short in the browser: each shot's image while its audio plays. */
+function Preview({ assets, vertical }: { assets: SceneAssetUrls[]; vertical: boolean }) {
+  const [index, setIndex] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const shots = [...assets].sort((a, b) => a.idx - b.idx);
+  const current = index != null ? shots[index] : shots[0];
+
+  useEffect(() => {
+    if (index == null) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = shots[index].audio_url!;
+    audio.play().catch(() => setIndex(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index]);
+
+  // Preload the next frame so cuts are instant.
+  const next = index != null ? shots[index + 1] : undefined;
+
+  return (
+    <section className="mb-16 grid items-center gap-10 rounded-xl border border-line bg-forest p-6 text-paper sm:p-10 lg:grid-cols-[auto_1fr]">
+      <div className={`${vertical ? "aspect-[9/16] w-56 sm:w-64" : "aspect-video w-full max-w-xl"} overflow-hidden rounded-md bg-forest-deep`}>
+        {current?.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={current.image_url} alt="" className="h-full w-full object-cover" />
+        )}
+        {next?.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={next.image_url} alt="" className="hidden" />
+        )}
+      </div>
+      <div>
+        <p className="label mb-4 text-paper/60">Preview</p>
+        <p className="display min-h-[4.5rem] text-2xl text-paper sm:text-3xl">{current?.text}</p>
+        <div className="mt-8 flex items-center gap-6">
+          {index == null ? (
+            <button onClick={() => setIndex(0)} className="btn border-ochre bg-ochre text-forest hover:bg-ochre/90">
+              Play the short
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                audioRef.current?.pause();
+                setIndex(null);
+              }}
+              className="btn border-paper/40 text-paper hover:bg-paper/10"
+            >
+              Stop
+            </button>
+          )}
+          <span className="font-mono text-sm text-paper/60">
+            {index != null ? `${String(index + 1).padStart(2, "0")} / ${String(shots.length).padStart(2, "0")}` : `${shots.length} shots`}
+          </span>
+        </div>
+        <audio
+          ref={audioRef}
+          onEnded={() => setIndex((i) => (i != null && i + 1 < shots.length ? i + 1 : null))}
+          className="hidden"
+        />
+      </div>
+    </section>
   );
 }

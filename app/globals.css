@@ -3,29 +3,73 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  @apply bg-ink text-white antialiased;
+  @apply bg-paper font-sans text-forest antialiased;
 }
 
-.btn-gold {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-5 py-3 font-semibold text-ink transition hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-40;
+::selection {
+  @apply bg-ochre-tint text-forest;
 }
 
-.btn-ghost {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-edge px-4 py-2 text-sm text-white/80 transition hover:border-gold/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
-}
+@layer components {
+  /* Layout */
+  .page {
+    @apply mx-auto w-full max-w-page px-5 sm:px-8;
+  }
+  .rule {
+    @apply border-line;
+  }
 
-.card {
-  @apply rounded-xl border border-edge bg-panel p-5;
-}
+  /* Type */
+  .label {
+    @apply font-mono text-[11px] font-medium uppercase tracking-label text-forest-soft;
+  }
+  .display {
+    @apply font-sans font-semibold leading-[0.95] tracking-display text-forest;
+  }
+  .lede {
+    @apply text-lg leading-relaxed text-forest-soft sm:text-xl;
+  }
 
-.input {
-  @apply w-full rounded-lg border border-edge bg-ink px-4 py-3 text-white placeholder-white/30 outline-none transition focus:border-gold/60;
-}
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-3 rounded-md border px-6 py-3.5 text-[15px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn border-clay bg-clay text-card hover:border-clay-dark hover:bg-clay-dark;
+  }
+  .btn-outline {
+    @apply btn border-forest text-forest hover:bg-forest hover:text-paper;
+  }
+  .btn-quiet {
+    @apply inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-forest-soft transition-colors hover:border-forest hover:text-forest disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .link-arrow {
+    @apply inline-flex items-center gap-2 text-[15px] text-forest-soft transition-colors hover:text-clay;
+  }
 
-.label {
-  @apply mb-2 block text-sm font-medium text-white/60;
+  /* Surfaces */
+  .card {
+    @apply rounded-xl border border-line bg-card p-6;
+  }
+  .tag {
+    @apply inline-flex items-center rounded border border-line px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-forest-soft;
+  }
+
+  /* Forms */
+  .field-label {
+    @apply mb-2 block font-mono text-[11px] font-medium uppercase tracking-label text-forest-soft;
+  }
+  .input {
+    @apply w-full rounded-md border border-line bg-card px-4 py-3 text-forest placeholder-forest-mute outline-none transition focus:border-forest;
+  }
+  .choice {
+    @apply rounded-md border border-line bg-card px-4 py-3 text-left transition-colors hover:border-forest-soft;
+  }
+  .choice-on {
+    @apply border-forest bg-forest-tint;
+  }
 }

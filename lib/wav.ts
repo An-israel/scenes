@@ -61,3 +61,19 @@ export function wavDurationMs(buf: Buffer): number {
   if (dataLength < 0) throw new Error("WAV has no data chunk");
   return pcmDurationMs(dataLength, sampleRate, channels, bitsPerSample);
 }
+
+/** Trim leading/trailing near-silence from 16-bit mono PCM, keeping a short
+ *  pad so words aren't clipped. Per-shot clips then butt together cleanly. */
+export function trimSilence(pcm: Buffer, sampleRate: number, padMs = 120, threshold = 500): Buffer {
+  const samples = Math.floor(pcm.length / 2);
+  if (samples === 0) return pcm;
+  let first = 0;
+  while (first < samples && Math.abs(pcm.readInt16LE(first * 2)) < threshold) first++;
+  if (first >= samples) return pcm; // all silence — leave it alone
+  let last = samples - 1;
+  while (last > first && Math.abs(pcm.readInt16LE(last * 2)) < threshold) last--;
+  const pad = Math.round((sampleRate * padMs) / 1000);
+  const start = Math.max(0, first - pad);
+  const end = Math.min(samples, last + 1 + pad);
+  return pcm.subarray(start * 2, end * 2);
+}

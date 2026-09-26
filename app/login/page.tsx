@@ -2,13 +2,14 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { Wordmark } from "@/components/ui";
+import { safeNext } from "@/lib/safe-next";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") ?? "/dashboard";
+  const next = safeNext(params.get("next"));
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -56,51 +57,83 @@ function LoginForm() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center px-6">
-      <Link href="/" className="mb-8 text-center text-xl font-bold">
-        Scene<span className="text-gold">Forge</span>
-      </Link>
+    <div className="grid min-h-screen lg:grid-cols-2">
+      <aside className="hidden flex-col justify-between bg-forest p-12 text-paper lg:flex">
+        <span className="font-mono text-[13px] font-medium uppercase tracking-[0.28em]">
+          Scenes<span className="text-ochre">.</span>
+        </span>
+        <div>
+          <p className="label mb-6 text-paper/60">Story shorts</p>
+          <p className="display max-w-md text-5xl text-paper">
+            Same characters. <span className="text-ochre">Every shot.</span>
+          </p>
+        </div>
+        <p className="label text-paper/50">30–60 second stories, narrated</p>
+      </aside>
 
-      <button onClick={handleGoogle} disabled={busy} className="btn-ghost w-full py-3">
-        Continue with Google
-      </button>
+      <div className="flex flex-col justify-center px-6 py-16 sm:px-16">
+        <div className="mx-auto w-full max-w-sm">
+          <div className="mb-14 lg:hidden">
+            <Wordmark />
+          </div>
+          <p className="label mb-4">{mode === "signin" ? "Welcome back" : "New account"}</p>
+          <h1 className="display mb-10 text-4xl">{mode === "signin" ? "Sign in" : "Create your account"}</h1>
 
-      <div className="my-6 flex items-center gap-3 text-xs text-white/30">
-        <div className="h-px flex-1 bg-edge" /> or <div className="h-px flex-1 bg-edge" />
+          <button onClick={handleGoogle} disabled={busy} className="btn-outline w-full">
+            Continue with Google
+          </button>
+
+          <div className="my-8 flex items-center gap-4">
+            <div className="h-px flex-1 bg-line" />
+            <span className="label">or</span>
+            <div className="h-px flex-1 bg-line" />
+          </div>
+
+          <form onSubmit={handleEmail} className="space-y-5">
+            <div>
+              <label className="field-label" htmlFor="email">
+                Email
+              </label>
+              <input
+                id="email"
+                className="input"
+                type="email"
+                placeholder="you@studio.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="field-label" htmlFor="password">
+                Password
+              </label>
+              <input
+                id="password"
+                className="input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={6}
+                required
+              />
+            </div>
+            <button type="submit" disabled={busy} className="btn-primary w-full">
+              {busy ? "One moment…" : mode === "signin" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+
+          {error && <p className="mt-5 text-sm text-clay-dark">{error}</p>}
+          {message && <p className="mt-5 text-sm text-forest">{message}</p>}
+
+          <button
+            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+            className="mt-8 text-sm text-forest-soft underline-offset-4 hover:text-clay hover:underline"
+          >
+            {mode === "signin" ? "No account yet? Create one" : "Already have an account? Sign in"}
+          </button>
+        </div>
       </div>
-
-      <form onSubmit={handleEmail} className="space-y-4">
-        <input
-          className="input"
-          type="email"
-          placeholder="you@email.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className="input"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          minLength={6}
-          required
-        />
-        <button type="submit" disabled={busy} className="btn-gold w-full">
-          {busy ? "Working…" : mode === "signin" ? "Sign in" : "Create account"}
-        </button>
-      </form>
-
-      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
-      {message && <p className="mt-4 text-sm text-gold">{message}</p>}
-
-      <button
-        onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-        className="mt-6 text-sm text-white/50 hover:text-white"
-      >
-        {mode === "signin" ? "No account? Create one" : "Have an account? Sign in"}
-      </button>
     </div>
   );
 }
