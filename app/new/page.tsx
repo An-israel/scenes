@@ -3,15 +3,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { PageHead } from "@/components/AppShell";
-import AccessPending from "@/components/AccessPending";
-import { useMember } from "@/components/useMember";
 import { VOICES } from "@/lib/voices";
 import { ART_STYLES } from "@/lib/styles";
 import { MAX_STORY_WORDS, countWords, estimateSeconds } from "@/lib/story";
 
 export default function NewStoryPage() {
   const router = useRouter();
-  const me = useMember();
   const [title, setTitle] = useState("");
   const [script, setScript] = useState("");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
@@ -64,15 +61,6 @@ export default function NewStoryPage() {
       setError(e instanceof Error ? e.message : "Could not create the project");
       setBusy(false);
     }
-  }
-
-  if (me && !me.allowed) {
-    return (
-      <AppShell>
-        <PageHead eyebrow="New story" title="Write a story." />
-        <AccessPending email={me.email} />
-      </AppShell>
-    );
   }
 
   return (

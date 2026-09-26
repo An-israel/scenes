@@ -15,8 +15,8 @@ Next.js 14 (App Router) + Supabase + Claude + Gemini, deployable on Vercel.
 4. **Export** — in the browser: one `audio.mp3`, `images/001_00m00s.png`… named by start time,
    `characters/`, `timeline.csv`, `readme.txt`, zipped. There's also an in-browser preview player.
 
-The owner's API keys live on the server. Only emails in `ALLOWED_EMAILS` can generate; everyone else can
-sign up and sees an early-access screen (payments can replace the allowlist later).
+The owner's API keys live on the server, and any signed-in account can generate. Access rules (plans,
+approvals) belong in `requireMember()` in `lib/api-helpers.ts`, the single gate every paid call goes through.
 
 ## Setup
 
@@ -36,7 +36,6 @@ Copy `.env.example` → `.env.local` (and add the same values in Vercel → Sett
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API |
 | `GEMINI_API_KEY` | Images, narration, Clip Finder (a paid-tier key is recommended) |
 | `ANTHROPIC_API_KEY` | Storyboard writing (optional; Gemini is the fallback) |
-| `ALLOWED_EMAILS` | Comma-separated emails allowed to generate |
 
 ### 3. Run
 

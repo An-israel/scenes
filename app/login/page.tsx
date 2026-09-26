@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Wordmark } from "@/components/ui";
 import { safeNext } from "@/lib/safe-next";
+import ThemeSwitch from "@/components/ThemeSwitch";
 
 function LoginForm() {
   const router = useRouter();
@@ -71,7 +72,8 @@ function LoginForm() {
         <p className="label text-paper/50">30–60 second stories, narrated</p>
       </aside>
 
-      <div className="flex flex-col justify-center px-6 py-16 sm:px-16">
+      <div className="relative flex flex-col justify-center px-6 py-16 sm:px-16">
+        <ThemeSwitch className="absolute right-6 top-6" />
         <div className="mx-auto w-full max-w-sm">
           <div className="mb-14 lg:hidden">
             <Wordmark />

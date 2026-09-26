@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import AppShell, { PageHead } from "@/components/AppShell";
-import AccessPending from "@/components/AccessPending";
-import { useMember } from "@/components/useMember";
 import { Arrow } from "@/components/ui";
 
 interface Clip {
@@ -23,7 +21,6 @@ const LENGTH_PRESETS = [
 ];
 
 export default function ClipsPage() {
-  const me = useMember();
   const [url, setUrl] = useState("");
   const [count, setCount] = useState(10);
   const [presetIdx, setPresetIdx] = useState(0);
@@ -93,15 +90,6 @@ export default function ClipsPage() {
     a.download = `clips_${videoId}.txt`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-  }
-
-  if (me && !me.allowed) {
-    return (
-      <AppShell>
-        <PageHead eyebrow="Clip finder" title="Find the moments." />
-        <AccessPending email={me.email} />
-      </AppShell>
-    );
   }
 
   return (

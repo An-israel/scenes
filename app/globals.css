@@ -4,6 +4,38 @@
 
 :root {
   color-scheme: light;
+  --paper: 247 243 236;
+  --card: 255 253 249;
+  --line: 227 220 207;
+  --forest: 31 58 46;
+  --forest-soft: 78 99 88;
+  --forest-mute: 127 140 132;
+  --forest-tint: 230 236 231;
+  --forest-deep: 23 44 35;
+  --clay: 196 85 45;
+  --clay-dark: 169 69 34;
+  --clay-tint: 246 227 218;
+  --ochre: 217 154 43;
+  --ochre-tint: 248 236 211;
+}
+
+/* Black & white: black page, white type, greys for the tints. "Forest"
+   blocks invert to white panels, so ochre becomes a dark grey there. */
+:root[data-theme="mono"] {
+  color-scheme: dark;
+  --paper: 10 10 10;
+  --card: 17 17 17;
+  --line: 38 38 38;
+  --forest: 242 242 242;
+  --forest-soft: 163 163 163;
+  --forest-mute: 115 115 115;
+  --forest-tint: 31 31 31;
+  --forest-deep: 0 0 0;
+  --clay: 255 255 255;
+  --clay-dark: 212 212 212;
+  --clay-tint: 23 23 23;
+  --ochre: 82 82 82;
+  --ochre-tint: 38 38 38;
 }
 
 body {

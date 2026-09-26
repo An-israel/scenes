@@ -5,6 +5,7 @@ import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Wordmark } from "@/components/ui";
+import ThemeSwitch from "@/components/ThemeSwitch";
 
 const NAV = [
   { href: "/dashboard", label: "Projects" },
@@ -41,10 +42,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <button onClick={signOut} className="label text-forest-mute hover:text-forest">
               Sign out
             </button>
+            <ThemeSwitch />
           </nav>
-          <button onClick={() => setOpen((o) => !o)} className="label text-forest md:hidden" aria-expanded={open}>
-            {open ? "Close" : "Menu"}
-          </button>
+          <div className="flex items-center gap-4 md:hidden">
+            <ThemeSwitch />
+            <button onClick={() => setOpen((o) => !o)} className="label text-forest" aria-expanded={open}>
+              {open ? "Close" : "Menu"}
+            </button>
+          </div>
         </div>
         {open && (
           <nav className="page flex flex-col gap-5 border-t border-line py-6 md:hidden">

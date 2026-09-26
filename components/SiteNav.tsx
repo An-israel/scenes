@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Wordmark } from "@/components/ui";
+import ThemeSwitch from "@/components/ThemeSwitch";
 
 const LINKS = [
   { href: "/#how", label: "How it works" },
@@ -23,6 +24,7 @@ export default function SiteNav() {
               {l.label}
             </Link>
           ))}
+          <ThemeSwitch />
           <Link
             href="/login"
             className="label rounded-md border border-forest px-5 py-3 text-forest transition-colors hover:bg-forest hover:text-paper"
@@ -30,13 +32,12 @@ export default function SiteNav() {
             Start a story
           </Link>
         </nav>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="label text-forest md:hidden"
-          aria-expanded={open}
-        >
-          {open ? "Close" : "Menu"}
-        </button>
+        <div className="flex items-center gap-4 md:hidden">
+          <ThemeSwitch />
+          <button onClick={() => setOpen((o) => !o)} className="label text-forest" aria-expanded={open}>
+            {open ? "Close" : "Menu"}
+          </button>
+        </div>
       </div>
       {open && (
         <nav className="page flex flex-col gap-5 border-t border-line py-6 md:hidden">

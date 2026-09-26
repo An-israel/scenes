@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { GeminiError } from "@/lib/gemini";
-import { isAllowed } from "@/lib/access";
 
 export async function requireUser() {
   const supabase = createClient();
@@ -12,17 +11,10 @@ export async function requireUser() {
   return { user, supabase, error: null };
 }
 
-/** Signed in AND on the allowlist — required for anything that spends API credit. */
+/** Gate for anything that spends API credit. Today any signed-in account
+ *  passes; this is the one place to add a plan or approval check later. */
 export async function requireMember() {
-  const result = await requireUser();
-  if (result.error || !result.user) return result;
-  if (!isAllowed(result.user.email)) {
-    return {
-      ...result,
-      error: jsonError("Your account doesn't have generation access yet.", 403),
-    };
-  }
-  return result;
+  return requireUser();
 }
 
 /** The owner's server-side Gemini key. Throws a clear error if it isn't configured. */
