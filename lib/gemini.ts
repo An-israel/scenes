@@ -1,5 +1,5 @@
 // Thin REST wrappers around the Gemini API. All calls run server-side with
-// the user's own decrypted key (BYOK) — keys never reach the client.
+// the owner's key (GEMINI_API_KEY) — it never reaches the browser.
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -53,7 +53,7 @@ export async function validateKey(apiKey: string): Promise<void> {
   }
 }
 
-/** Plain text generation (scene split). Forces JSON output. */
+/** JSON text generation (storyboard fallback when no Claude key is set). */
 export async function generateJson(apiKey: string, prompt: string): Promise<string> {
   const data = await callModel(apiKey, TEXT_MODEL, {
     contents: [{ parts: [{ text: prompt }] }],
@@ -132,23 +132,47 @@ export async function generateSpeech(
   };
 }
 
-/** Image generation with the locked style prompt already applied. */
+export interface InlineImage {
+  bytes: Buffer;
+  mimeType: string;
+}
+
+/** Image generation. Optional reference images (character sheets) are sent
+ *  ahead of the prompt so the model keeps those characters identical. */
 export async function generateImage(
   apiKey: string,
   prompt: string,
-  aspectRatio: "16:9" | "9:16" = "16:9"
-): Promise<{ bytes: Buffer; mimeType: string }> {
+  aspectRatio: "16:9" | "9:16" | "1:1" = "16:9",
+  references: InlineImage[] = []
+): Promise<InlineImage> {
   const data = await callModel(apiKey, IMAGE_MODEL, {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [
+      {
+        parts: [
+          ...references.map((r) => ({
+            inlineData: { mimeType: r.mimeType, data: r.bytes.toString("base64") },
+          })),
+          { text: prompt },
+        ],
+      },
+    ],
     generationConfig: {
-      responseModalities: ["TEXT", "IMAGE"],
+      responseModalities: ["IMAGE"],
       imageConfig: { aspectRatio },
     },
   });
   const part = data?.candidates?.[0]?.content?.parts?.find((p: any) =>
     p.inlineData?.mimeType?.startsWith("image/")
   );
-  if (!part?.inlineData?.data) throw new GeminiError("Image model returned no image", 502);
+  if (!part?.inlineData?.data) {
+    const reason = data?.candidates?.[0]?.finishReason ?? data?.promptFeedback?.blockReason;
+    throw new GeminiError(
+      reason && reason !== "STOP"
+        ? `Image model declined this shot (${reason}). Try rewording the scene.`
+        : "Image model returned no image",
+      502
+    );
+  }
   return {
     bytes: Buffer.from(part.inlineData.data, "base64"),
     mimeType: part.inlineData.mimeType,

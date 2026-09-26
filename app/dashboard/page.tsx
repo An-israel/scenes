@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import AppShell from "@/components/AppShell";
+import AppShell, { PageHead } from "@/components/AppShell";
+import AccessPending from "@/components/AccessPending";
+import { Arrow } from "@/components/ui";
+import { isAllowed } from "@/lib/access";
+import { getStyle } from "@/lib/styles";
 import type { Project } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -11,67 +15,76 @@ function formatDuration(ms: number | null): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  done: "text-gold",
-  error: "text-red-400",
-  draft: "text-white/40",
-  splitting: "text-white/60",
-  generating: "text-white/60",
+const STATUS: Record<string, { label: string; className: string }> = {
+  done: { label: "Ready", className: "bg-forest-tint text-forest" },
+  error: { label: "Needs attention", className: "bg-clay-tint text-clay-dark" },
+  draft: { label: "Draft", className: "bg-paper text-forest-soft" },
+  splitting: { label: "Storyboarding", className: "bg-ochre-tint text-forest" },
+  generating: { label: "In progress", className: "bg-ochre-tint text-forest" },
 };
 
 export default async function DashboardPage() {
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, title, status, total_duration_ms, created_at, zip_path")
+    .select("*")
     .order("created_at", { ascending: false });
 
-  const list = (projects ?? []) as Pick<
-    Project,
-    "id" | "title" | "status" | "total_duration_ms" | "created_at" | "zip_path"
-  >[];
+  const list = (projects ?? []) as Project[];
+  const allowed = isAllowed(user?.email);
 
   return (
     <AppShell>
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Your projects</h1>
-        <Link href="/new" className="btn-gold">
-          + New project
-        </Link>
-      </div>
+      <PageHead eyebrow={`Projects — ${String(list.length).padStart(2, "0")}`} title="Your stories.">
+        {allowed && (
+          <Link href="/new" className="btn-primary">
+            New story
+          </Link>
+        )}
+      </PageHead>
 
-      {list.length === 0 ? (
-        <div className="card flex flex-col items-center py-16 text-center">
-          <p className="text-lg text-white/60">No projects yet.</p>
-          <p className="mt-2 max-w-sm text-sm text-white/40">
-            Paste a script, pick a voice, and SceneForge will forge your narration and scene
-            images. First, add your free Gemini key in{" "}
-            <Link href="/settings" className="text-gold underline">
-              Settings
-            </Link>
-            .
-          </p>
-          <Link href="/new" className="btn-gold mt-6">
-            Create your first project
+      {!allowed && list.length === 0 ? (
+        <AccessPending email={user?.email} />
+      ) : list.length === 0 ? (
+        <div className="rounded-xl border border-line bg-card px-8 py-20 text-center">
+          <p className="label mb-5">Nothing here yet</p>
+          <h2 className="display text-3xl sm:text-4xl">Start with a short story.</h2>
+          <p className="lede mx-auto mt-4 max-w-md">A few sentences is enough — about 75 to 150 words makes a 30 to 60 second short.</p>
+          <Link href="/new" className="btn-primary mt-10">
+            Write your first story
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {list.map((p) => (
-            <Link key={p.id} href={`/project/${p.id}`} className="card transition hover:border-gold/50">
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="font-semibold">{p.title}</h2>
-                <span className={`text-xs uppercase tracking-wide ${STATUS_STYLES[p.status] ?? "text-white/40"}`}>
-                  {p.status}
+        <div className="overflow-hidden rounded-xl border border-line bg-card">
+          {list.map((p, i) => {
+            const st = STATUS[p.status] ?? STATUS.draft;
+            return (
+              <Link
+                key={p.id}
+                href={`/project/${p.id}`}
+                className={`group grid items-center gap-4 px-6 py-6 transition-colors hover:bg-paper sm:grid-cols-[3rem_1fr_auto_auto_auto] sm:px-8 ${
+                  i > 0 ? "border-t border-line" : ""
+                }`}
+              >
+                <span className="font-mono text-xs text-forest-mute">{String(i + 1).padStart(2, "0")}</span>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight group-hover:text-clay">{p.title}</h2>
+                  <p className="mt-1 text-sm text-forest-mute">
+                    {new Date(p.created_at).toLocaleDateString()} · {getStyle(p.style).label} ·{" "}
+                    {p.aspect_ratio === "16:9" ? "16:9" : "9:16"}
+                  </p>
+                </div>
+                <span className="font-mono text-sm text-forest-soft">{formatDuration(p.total_duration_ms)}</span>
+                <span className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${st.className}`}>
+                  {st.label}
                 </span>
-              </div>
-              <div className="mt-3 flex gap-4 text-sm text-white/40">
-                <span>{new Date(p.created_at).toLocaleDateString()}</span>
-                <span>{formatDuration(p.total_duration_ms)}</span>
-                {p.zip_path && <span className="text-gold">ZIP ready</span>}
-              </div>
-            </Link>
-          ))}
+                <Arrow className="hidden text-forest-mute group-hover:text-clay sm:block" />
+              </Link>
+            );
+          })}
         </div>
       )}
     </AppShell>

@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import AppShell from "@/components/AppShell";
+import AppShell, { PageHead } from "@/components/AppShell";
+import AccessPending from "@/components/AccessPending";
+import { useMember } from "@/components/useMember";
+import { Arrow } from "@/components/ui";
 
 interface Clip {
   start: string;
@@ -20,6 +23,7 @@ const LENGTH_PRESETS = [
 ];
 
 export default function ClipsPage() {
+  const me = useMember();
   const [url, setUrl] = useState("");
   const [count, setCount] = useState(10);
   const [presetIdx, setPresetIdx] = useState(0);
@@ -28,40 +32,6 @@ export default function ClipsPage() {
   const [clips, setClips] = useState<Clip[] | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [dlBusy, setDlBusy] = useState<string | null>(null);
-  const [dlError, setDlError] = useState<string | null>(null);
-  const [dlReady, setDlReady] = useState<string | null>(null);
-
-  async function downloadVideo(quality: "720" | "1080") {
-    if (!videoId) return;
-    setDlBusy(quality);
-    setDlError(null);
-    setDlReady(null);
-    try {
-      const res = await fetch("/api/clips/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, quality }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Download failed");
-      // The relay streams the file with an attachment header, so opening the
-      // link downloads it directly (the heavy work never touches our server).
-      const a = document.createElement("a");
-      a.href = data.url;
-      a.target = "_blank";
-      a.rel = "noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setDlReady(quality);
-    } catch (e) {
-      setDlError(e instanceof Error ? e.message : "Download failed");
-    } finally {
-      setDlBusy(null);
-    }
-  }
-
   async function analyze(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -125,29 +95,42 @@ export default function ClipsPage() {
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   }
 
+  if (me && !me.allowed) {
+    return (
+      <AppShell>
+        <PageHead eyebrow="Clip finder" title="Find the moments." />
+        <AccessPending email={me.email} />
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell>
-      <h1 className="text-2xl font-bold">Clip Finder</h1>
-      <p className="mt-1 text-sm text-white/50">
-        Paste a YouTube link. The AI watches the video and finds the most powerful moments to cut into
-        shorts — with timestamps, a hook reason, a caption, and the transcript for each.
+      <PageHead eyebrow="Clip finder" title="Find the moments." />
+      <p className="lede -mt-4 mb-12 max-w-2xl">
+        Paste a public YouTube link. The video is watched end to end and the strongest moments come back as
+        ready-to-cut clips — timestamps, a caption, why it works, and the transcript.
       </p>
 
-      <form onSubmit={analyze} className="card mt-6 space-y-4">
-        <div>
-          <label className="label">YouTube link</label>
-          <input
-            className="input w-full"
-            type="text"
-            placeholder="https://www.youtube.com/watch?v=…"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap gap-4">
+      <form onSubmit={analyze} className="rounded-xl border border-line bg-card p-6 sm:p-8">
+        <label className="field-label" htmlFor="yt">
+          YouTube link
+        </label>
+        <input
+          id="yt"
+          className="input"
+          type="text"
+          placeholder="https://www.youtube.com/watch?v=…"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <div className="mt-6 flex flex-wrap items-end gap-6">
           <div>
-            <label className="label">Clips to find</label>
+            <label className="field-label" htmlFor="count">
+              Clips
+            </label>
             <input
+              id="count"
               className="input w-24"
               type="number"
               min={1}
@@ -157,12 +140,10 @@ export default function ClipsPage() {
             />
           </div>
           <div>
-            <label className="label">Clip length</label>
-            <select
-              className="input"
-              value={presetIdx}
-              onChange={(e) => setPresetIdx(Number(e.target.value))}
-            >
+            <label className="field-label" htmlFor="len">
+              Length
+            </label>
+            <select id="len" className="input" value={presetIdx} onChange={(e) => setPresetIdx(Number(e.target.value))}>
               {LENGTH_PRESETS.map((p, i) => (
                 <option key={i} value={i}>
                   {p.label}
@@ -170,122 +151,66 @@ export default function ClipsPage() {
               ))}
             </select>
           </div>
+          <button type="submit" disabled={busy || url.trim().length < 8} className="btn-primary">
+            {busy ? "Watching the video…" : "Find clips"}
+          </button>
         </div>
-        <button type="submit" disabled={busy || url.trim().length < 8} className="btn-gold">
-          {busy ? "Watching the video…" : "Find clips"}
-        </button>
-        {busy && (
-          <p className="text-xs text-white/40">
-            Analyzing the full video can take 20–60 seconds depending on its length.
-          </p>
-        )}
+        {busy && <p className="mt-4 font-mono text-xs text-forest-mute">Longer videos can take up to a minute.</p>}
       </form>
 
       {error && (
-        <div className="card mt-6 border-red-900 bg-red-950/40">
-          <p className="text-sm text-red-300">{error}</p>
-        </div>
-      )}
-
-      {videoId && (
-        <div className="card mt-6">
-          <h2 className="font-semibold">Download the source video</h2>
-          <p className="mt-1 text-sm text-white/50">
-            Grab the full video, then cut it in CapCut using the timestamps below. 1080p takes a bit
-            longer (audio + video are merged for you).
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              onClick={() => downloadVideo("720")}
-              disabled={dlBusy !== null}
-              className="btn-ghost"
-            >
-              {dlBusy === "720" ? "Preparing 720p…" : "⬇ Download 720p"}
-            </button>
-            <button
-              onClick={() => downloadVideo("1080")}
-              disabled={dlBusy !== null}
-              className="btn-gold"
-            >
-              {dlBusy === "1080" ? "Preparing 1080p…" : "⬇ Download 1080p"}
-            </button>
-          </div>
-          {dlBusy && (
-            <p className="mt-3 text-xs text-white/40">
-              Fetching and merging on a free relay — this can take 10–40 seconds. Your download opens
-              in a new tab when ready.
-            </p>
-          )}
-          {dlReady && (
-            <p className="mt-3 text-sm text-gold">
-              {dlReady}p download started in a new tab. If nothing happened, allow pop-ups for this
-              site and try again.
-            </p>
-          )}
-          {dlError && <p className="mt-3 text-sm text-red-400">{dlError}</p>}
+        <div className="mt-8 rounded-xl border border-clay/40 bg-clay-tint p-6">
+          <p className="text-clay-dark">{error}</p>
         </div>
       )}
 
       {clips && (
-        <div className="mt-8">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-semibold">
-              {clips.length} clip{clips.length !== 1 ? "s" : ""} found
-            </h2>
+        <section className="mt-16">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <p className="label">
+              {String(clips.length).padStart(2, "0")} clip{clips.length !== 1 ? "s" : ""} found
+            </p>
             <div className="flex gap-2">
-              <button onClick={copyAll} className="btn-ghost px-3 py-1.5 text-xs">
-                {copied === "all" ? "Copied!" : "Copy all"}
+              <button onClick={copyAll} className="btn-quiet">
+                {copied === "all" ? "Copied" : "Copy all"}
               </button>
-              <button onClick={downloadTxt} className="btn-ghost px-3 py-1.5 text-xs">
-                ⬇ Download .txt
+              <button onClick={downloadTxt} className="btn-quiet">
+                Save as .txt
               </button>
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="overflow-hidden rounded-xl border border-line bg-card">
             {clips.map((c, i) => {
               const len = c.end_seconds - c.start_seconds;
               const jump = `https://www.youtube.com/watch?v=${videoId}&t=${c.start_seconds}s`;
               return (
-                <div key={i} className="card">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gold text-sm font-bold text-ink">
-                      {i + 1}
-                    </span>
-                    <code className="rounded bg-ink px-2 py-1 text-sm text-gold">
-                      {c.start} → {c.end}
-                    </code>
-                    <span className="text-xs text-white/40">{len}s</span>
-                    <button
-                      onClick={() => copy(`${c.start} - ${c.end}`, `ts${i}`)}
-                      className="btn-ghost px-2 py-1 text-xs"
-                    >
-                      {copied === `ts${i}` ? "Copied!" : "Copy times"}
-                    </button>
-                    <a href={jump} target="_blank" rel="noreferrer" className="btn-ghost px-2 py-1 text-xs">
-                      ▶ Preview on YouTube
-                    </a>
+                <div key={i} className={`grid gap-4 p-6 sm:grid-cols-[3rem_1fr] sm:p-8 ${i > 0 ? "border-t border-line" : ""}`}>
+                  <span className="font-mono text-sm text-clay">{String(i + 1).padStart(2, "0")}</span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="rounded bg-ochre-tint px-2.5 py-1 font-mono text-sm">
+                        {c.start} – {c.end}
+                      </span>
+                      <span className="font-mono text-xs text-forest-mute">{len}s</span>
+                      <button onClick={() => copy(`${c.start} - ${c.end}`, `ts${i}`)} className="btn-quiet">
+                        {copied === `ts${i}` ? "Copied" : "Copy times"}
+                      </button>
+                      <a href={jump} target="_blank" rel="noreferrer" className="link-arrow text-sm">
+                        Open at this moment <Arrow />
+                      </a>
+                    </div>
+                    <h3 className="mt-4 text-xl font-semibold tracking-tight">{c.title}</h3>
+                    {c.reason && <p className="mt-2 text-forest-soft">{c.reason}</p>}
+                    {c.transcript && (
+                      <p className="mt-4 border-l-2 border-line pl-4 leading-relaxed text-forest-soft">{c.transcript}</p>
+                    )}
                   </div>
-
-                  <p className="mt-3 font-semibold text-white/90">{c.title}</p>
-                  {c.reason && (
-                    <p className="mt-1 text-sm text-gold/80">
-                      <span className="text-white/40">Why it works: </span>
-                      {c.reason}
-                    </p>
-                  )}
-                  {c.transcript && (
-                    <p className="mt-2 text-sm leading-relaxed text-white/60">“{c.transcript}”</p>
-                  )}
                 </div>
               );
             })}
           </div>
-
-          <p className="mt-6 text-center text-xs text-white/30">
-            Download the video above, then cut to these timestamps in CapCut to make your shorts.
-          </p>
-        </div>
+        </section>
       )}
     </AppShell>
   );

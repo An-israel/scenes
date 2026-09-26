@@ -1,50 +1,72 @@
-// The two locked prompts from the product spec. Do not tweak casually —
-// every project's visual consistency depends on the style prompt.
+// Prompts for the story pipeline. The storyboard prompt is shared by the
+// Claude and Gemini paths so both produce the same shape.
 
-export function sceneSplitPrompt(script: string): string {
-  return `You are a storyboard director for a fast-cut 2D animated explainer video.
-Split the SCRIPT below into rapid visual BEATS.
+export const STORYBOARD_INSTRUCTIONS = `You are the director of a short animated story video (30–60 seconds) for TikTok, Reels and Shorts.
+Turn the STORY into a storyboard of quick SHOTS that will each show one still image while the narrator reads that shot's words.
 
-Rules:
-- A beat = one tiny visual moment: MAXIMUM 8 words (≈3 seconds of speech).
-  Most beats should be 4-8 words. The video cuts to a new image every beat,
-  so short beats keep viewer attention.
-- Break sentences at natural phrase boundaries — commas, "and"/"but"/"so",
-  verb changes. Never break mid-phrase in a way that reads awkwardly.
-- Cover the ENTIRE script. Do not skip, merge away, or rewrite any words —
-  beat texts joined together must equal the original script.
-- For each beat, write IMAGE_DESCRIPTION: a concrete, drawable visual —
-  WHO is in frame (use the recurring character when the narration speaks
-  about a person), WHAT they're doing, WHERE, plus any key object, symbol,
-  text label, or arrow. Describe a single static frame, not motion.
-- Keep descriptions literal and simple — flat 2D explainer cartoon logic
-  (e.g. "stick-figure man kneeling by a campfire roasting meat on a stick,
-  savanna with flat-topped trees behind, worried expression").
+Rules for shots:
+- Each shot's narration is one natural phrase of 7–13 words (about 3–5 seconds read aloud).
+- Break at natural phrase boundaries. Never split in a way that reads awkwardly.
+- Cover the ENTIRE story in order. Do not skip, add, merge away or rewrite words: the shot narrations joined together must equal the story.
+- For each shot write "visual": one concrete, drawable frame. Say who is in frame (by character name), what they are doing, where, the camera framing (wide, medium, close-up) and the mood. Describe a single moment, not motion. Vary framing across shots so the video feels edited.
+- "characters" lists the names of the recurring characters visible in that shot (empty if none).
+
+Rules for characters:
+- List every recurring character (people, animals, creatures) who appears in more than one shot, at most 4.
+- "look" is a precise, fixed visual description reused for every image: age, build, skin/fur, hair, face, and one specific outfit with colors. Be concrete (e.g. "8-year-old girl, light brown skin, curly black hair in two puffs, round glasses, yellow raincoat, red rubber boots"). No personality words.
+- Use the character's name from the story, or a short descriptive name if unnamed.
+
+"setting" is one sentence fixing the world, era and color mood so every shot matches.
+"title" is a short title for the video.`;
+
+export function storyboardPrompt(story: string): string {
+  return `${STORYBOARD_INSTRUCTIONS}
 
 Return STRICT JSON only:
-{"scenes":[{"index":1,"text":"...","image_description":"..."}]}
+{"title":"...","setting":"...","characters":[{"name":"...","look":"..."}],"shots":[{"narration":"...","visual":"...","characters":["..."]}]}
 
-SCRIPT:
-${script}`;
+STORY:
+${story}`;
 }
 
-export function imagePrompt(imageDescription: string, aspectRatio: "16:9" | "9:16" = "16:9"): string {
-  const frame =
-    aspectRatio === "9:16"
-      ? "9:16 vertical portrait frame (TikTok/Shorts)"
-      : "16:9";
-  return `2D hand-drawn explainer cartoon, minimalist stick-figure style. Characters:
-simple stick bodies with bold black ink outlines, round white heads, large
-simple dot eyes, expressive shaggy scribbled hair, minimal facial features.
-Flat solid colors, no gradients, no shading, no texture. Thick uniform
-black outlines on every element. Simple flat background in warm muted
-tones (sandy beige ground, burnt-orange or off-white sky), minimal props
-drawn in the same naive doodle style. Generous empty space, composition
-readable in 1 second. Educational explainer animation frame,
-${frame}, high resolution. NO photorealism, NO 3D, NO gradients, NO small
-unreadable text, NO watermark.
+export function characterSheetPrompt(stylePrompt: string, setting: string, name: string, look: string): string {
+  return `Character reference sheet for an animated short.
 
-SCENE TO DRAW: ${imageDescription}`;
+STYLE: ${stylePrompt}
+WORLD: ${setting}
+
+CHARACTER: ${name} — ${look}
+
+Show the same character three times side by side on a plain light neutral background: full body front view, three-quarter view, and a close-up of the face with a neutral expression. Even lighting, no scenery, no text, no labels, no watermark. The design must be clear enough to redraw exactly in later scenes.`;
+}
+
+export function shotPrompt(
+  stylePrompt: string,
+  setting: string,
+  visual: string,
+  cast: Array<{ name: string; look: string }>,
+  aspectRatio: "16:9" | "9:16"
+): string {
+  const castLines = cast.length
+    ? `CHARACTERS IN THIS SHOT (the attached reference images show each one; keep face, hair, body and outfit IDENTICAL to the references):\n${cast
+        .map((c) => `- ${c.name}: ${c.look}`)
+        .join("\n")}\n\n`
+    : "";
+  const frame = aspectRatio === "9:16" ? "vertical 9:16 frame" : "horizontal 16:9 frame";
+  return `One frame from an animated short film, ${frame}.
+
+STYLE: ${stylePrompt}
+WORLD: ${setting}
+
+${castLines}SHOT: ${visual}
+
+Full-bleed illustration, cinematic composition, no text, no captions, no speech bubbles, no borders, no watermark.`;
+}
+
+/** Gemini TTS: a short style lead-in, then the words. Kept to Gemini's
+ *  documented "Say …:" shape so the instruction itself isn't read aloud. */
+export function ttsPrompt(voiceStyle: string, text: string): string {
+  return `Say in a ${voiceStyle} storytelling voice: ${text}`;
 }
 
 export function clipFinderPrompt(count: number, minSec: number, maxSec: number): string {
@@ -75,8 +97,4 @@ Return STRICT JSON only, no markdown:
 }]}
 
 Give exactly ${count} clips if the video is long enough; fewer only if the video is too short.`;
-}
-
-export function ttsPrompt(voiceStyle: string, sceneText: string): string {
-  return `Read the following narration in a ${voiceStyle} tone. Natural pace, clear diction. Script begins now: "${sceneText}"`;
 }

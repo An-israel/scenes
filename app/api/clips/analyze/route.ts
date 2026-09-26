@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  requireUser,
-  jsonError,
-  handleRouteError,
-  getUserKeys,
-  NO_KEY_MESSAGE,
-} from "@/lib/api-helpers";
-import { analyzeYouTube, withRetry } from "@/lib/gemini";
+import { requireMember, jsonError, handleRouteError, geminiKey } from "@/lib/api-helpers";
+import { analyzeYouTube, withRetry, GeminiError } from "@/lib/gemini";
 import { clipFinderPrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
-// Long videos take longer to analyze; honored on Vercel Pro (Hobby caps at 60s).
+// Long videos take longer to analyze; check your Vercel plan's function limit.
 export const maxDuration = 300;
 
 interface Clip {
@@ -43,7 +37,7 @@ function extractVideoId(url: string): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, error } = await requireUser();
+    const { error } = await requireMember();
     if (error) return error;
 
     const { url, count, minSec, maxSec } = await req.json();
@@ -58,33 +52,26 @@ export async function POST(req: NextRequest) {
     const lo = Math.min(Math.max(Number(minSec) || 20, 5), 600);
     const hi = Math.min(Math.max(Number(maxSec) || 60, lo + 5), 900);
 
-    // Only the free Gemini key can analyze YouTube videos directly.
-    const keys = await getUserKeys(user.id);
-    if (!keys.gemini) {
-      return jsonError(
-        "Clip Finder needs your free Google Gemini key (it can watch YouTube directly). Add it in Settings.",
-        400
-      );
-    }
-
     let raw: string;
     try {
       raw = await withRetry(() =>
-        analyzeYouTube(keys.gemini!, canonicalUrl, clipFinderPrompt(n, lo, hi))
+        analyzeYouTube(geminiKey(), canonicalUrl, clipFinderPrompt(n, lo, hi))
       );
     } catch (e: any) {
-      // Common, user-fixable failure modes get a friendlier message.
+      // Common, user-fixable failure modes get a friendlier message. Match on
+      // the HTTP status first; message patterns only as a fallback.
       const msg = e?.message ?? "";
+      const status = e instanceof GeminiError ? e.status : 0;
       if (/token count exceeds|1048576|exceeds the maximum number of tokens/i.test(msg)) {
         return jsonError(
           "This video is too long for the analyzer (roughly 4+ hours of footage). Try a shorter video, or clip out the section you care about first.",
           422
         );
       }
-      if (/quota|rate|429/i.test(msg)) {
-        return jsonError("Daily free Gemini limit reached for video analysis — try again tomorrow.", 429);
+      if (status === 429 || /\bquota\b|rate limit|resource.?exhausted/i.test(msg)) {
+        return jsonError("The video analysis limit was reached — try again a little later.", 429);
       }
-      if (/private|forbidden|permission|unsupported|not.*found|400/i.test(msg)) {
+      if (status === 400 || status === 403 || status === 404 || /\bprivate\b|forbidden|permission denied|unsupported/i.test(msg)) {
         return jsonError(
           "Couldn't analyze that video. It must be PUBLIC (not private/unlisted) and not age-restricted. Very long videos may also be rejected.",
           422
