@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import AppShell, { PageHead } from "@/components/AppShell";
-import AccessPending from "@/components/AccessPending";
 import { Arrow } from "@/components/ui";
-import { isAllowed } from "@/lib/access";
 import { getStyle } from "@/lib/styles";
 import type { Project } from "@/lib/types";
 
@@ -25,30 +23,22 @@ const STATUS: Record<string, { label: string; className: string }> = {
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   const { data: projects } = await supabase
     .from("projects")
     .select("*")
     .order("created_at", { ascending: false });
 
   const list = (projects ?? []) as Project[];
-  const allowed = isAllowed(user?.email);
 
   return (
     <AppShell>
       <PageHead eyebrow={`Projects — ${String(list.length).padStart(2, "0")}`} title="Your stories.">
-        {allowed && (
-          <Link href="/new" className="btn-primary">
-            New story
-          </Link>
-        )}
+        <Link href="/new" className="btn-primary">
+          New story
+        </Link>
       </PageHead>
 
-      {!allowed && list.length === 0 ? (
-        <AccessPending email={user?.email} />
-      ) : list.length === 0 ? (
+      {list.length === 0 ? (
         <div className="rounded-xl border border-line bg-card px-8 py-20 text-center">
           <p className="label mb-5">Nothing here yet</p>
           <h2 className="display text-3xl sm:text-4xl">Start with a short story.</h2>

@@ -180,17 +180,17 @@ export default function LandingPage() {
       {/* CTA */}
       <section className="page py-28">
         <div className="rounded-xl border border-line bg-clay-tint p-10 sm:p-16">
-          <p className="label mb-5">Early access</p>
-          <h2 className="display max-w-3xl text-4xl sm:text-5xl">Scenes is invite-only while paid plans are on the way.</h2>
+          <p className="label mb-5">Get started</p>
+          <h2 className="display max-w-3xl text-4xl sm:text-5xl">Your first short is a paragraph away.</h2>
           <p className="lede mt-6 max-w-2xl">
-            Create an account now and you&apos;ll be first in line when access opens.
+            Create an account, paste a story, and watch it get storyboarded, drawn and narrated.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-8">
             <Link href="/login" className="btn-primary">
               Create your account
             </Link>
             <Link href="/login" className="link-arrow">
-              Already invited? Sign in <Arrow />
+              Already have an account? Sign in <Arrow />
             </Link>
           </div>
         </div>

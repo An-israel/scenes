@@ -3,6 +3,7 @@ import "@fontsource-variable/inter-tight";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "./globals.css";
+import { themeBootScript } from "@/components/ThemeSwitch";
 
 export const metadata: Metadata = {
   title: "Scenes — story shorts with consistent characters",
@@ -18,7 +19,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="min-h-screen">{children}</body>
     </html>
   );

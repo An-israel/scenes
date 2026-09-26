@@ -2,29 +2,33 @@ import type { Config } from "tailwindcss";
 
 // Three-color system on warm paper: forest (text, dark sections),
 // terracotta (primary accent) and ochre (highlights), each with a tint.
+const v = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      // Colors come from CSS variables (globals.css) so the Color and B&W
+      // themes can swap them. Stored as "R G B" to keep opacity modifiers.
       colors: {
-        paper: "#F7F3EC",
-        card: "#FFFDF9",
-        line: "#E3DCCF",
+        paper: v("paper"),
+        card: v("card"),
+        line: v("line"),
         forest: {
-          DEFAULT: "#1F3A2E",
-          soft: "#4E6358",
-          mute: "#7F8C84",
-          tint: "#E6ECE7",
-          deep: "#172C23",
+          DEFAULT: v("forest"),
+          soft: v("forest-soft"),
+          mute: v("forest-mute"),
+          tint: v("forest-tint"),
+          deep: v("forest-deep"),
         },
         clay: {
-          DEFAULT: "#C4552D",
-          dark: "#A94522",
-          tint: "#F6E3DA",
+          DEFAULT: v("clay"),
+          dark: v("clay-dark"),
+          tint: v("clay-tint"),
         },
         ochre: {
-          DEFAULT: "#D99A2B",
-          tint: "#F8ECD3",
+          DEFAULT: v("ochre"),
+          tint: v("ochre-tint"),
         },
       },
       fontFamily: {
