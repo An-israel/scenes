@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { buildProjectZip, triggerDownload, formatClock, svgToPng, type ZipProgress } from "@/lib/client/zip";
+import { buildProjectVideo, canExportVideo, type VideoProgress } from "@/lib/client/video";
 import { extOfUrl, mimeForExt } from "@/lib/media";
 import { getStyle } from "@/lib/styles";
 import { getVoice } from "@/lib/voices";
@@ -14,7 +15,7 @@ interface Props {
   initialScenes: Scene[];
 }
 
-type Phase = "idle" | "storyboard" | "cast" | "shots" | "finalizing" | "zipping" | "done" | "error";
+type Phase = "idle" | "storyboard" | "cast" | "shots" | "finalizing" | "zipping" | "rendering" | "done" | "error";
 
 interface AssetsResponse {
   assets: SceneAssetUrls[];
@@ -51,6 +52,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   shots: "Drawing and voicing shots",
   finalizing: "Setting the timing",
   zipping: "Packing your download",
+  rendering: "Rendering your video",
   done: "",
   error: "",
 };
@@ -69,6 +71,8 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
   const [busy, setBusy] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(initialProject.title);
+  const [captions, setCaptions] = useState(true);
+  const [videoSupported, setVideoSupported] = useState(true);
   const runningRef = useRef(false);
   const scenesRef = useRef(scenes);
   scenesRef.current = scenes;
@@ -168,6 +172,7 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       if (initialProject.status === "draft" || initialProject.status === "splitting") run();
       else if (initialProject.status === "done") setPhase("done");
     });
+    setVideoSupported(canExportVideo());
     const timer = setInterval(refreshAssets, REFRESH_EVERY_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -176,7 +181,8 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
   const incomplete = scenes.filter((s) => !s.audio_path || !s.image_path).length;
   const completed = scenes.length - incomplete;
   const isRunning = phase === "storyboard" || phase === "cast" || phase === "shots" || phase === "finalizing";
-  const canResume = !isRunning && phase !== "zipping" && (scenes.length === 0 || incomplete > 0 || cast.some((c) => !c.sheet_url));
+  const exporting = phase === "zipping" || phase === "rendering";
+  const canResume = !isRunning && !exporting && (scenes.length === 0 || incomplete > 0 || cast.some((c) => !c.sheet_url));
   const isReady = project.status === "done" && incomplete === 0 && scenes.length > 0;
 
   async function withBusy(key: string, fn: () => Promise<void>) {
@@ -265,6 +271,25 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
     }
   }
 
+  async function downloadVideo() {
+    setPhase("rendering");
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await refreshAssets();
+      if (!data) throw new Error("Could not load the project files");
+      const blob = await buildProjectVideo(data.assets, { vertical: isVertical, captions }, (p: VideoProgress) =>
+        setStatusLine(p.total ? `${p.step} ${p.current}/${p.total}` : p.step)
+      );
+      triggerDownload(blob, `${project.title.replace(/[^\w-]+/g, "_") || "scenes"}.mp4`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't render the video");
+    } finally {
+      setPhase("done");
+      setStatusLine("");
+    }
+  }
+
   const saveTitle = () =>
     withBusy("title", async () => {
       const d = await callApi<{ project: { title: string } }>(`/api/projects/${project.id}`, { title: titleDraft }, "PATCH");
@@ -333,12 +358,17 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
                 {scenes.length === 0 ? "Start" : `Resume · ${incomplete} left`}
               </button>
             )}
+            {isReady && videoSupported && (
+              <button onClick={downloadVideo} disabled={exporting} className="btn-primary">
+                {phase === "rendering" ? "Rendering…" : "Download MP4"}
+              </button>
+            )}
             {isReady && (
-              <button onClick={downloadZip} disabled={phase === "zipping"} className="btn-primary">
+              <button onClick={downloadZip} disabled={exporting} className="btn-outline">
                 {phase === "zipping" ? "Packing…" : "Download ZIP"}
               </button>
             )}
-            {zipUrl && phase !== "zipping" && (
+            {zipUrl && !exporting && (
               <a href={zipUrl} className="btn-outline">
                 Last download
               </a>
@@ -348,7 +378,22 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       </div>
 
       {/* Progress */}
-      {(isRunning || phase === "zipping") && (
+      {isReady && videoSupported && (
+        <div className="-mt-4 mb-10 flex justify-end">
+          <label className="flex cursor-pointer items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-forest-soft">
+            <input
+              type="checkbox"
+              checked={captions}
+              onChange={(e) => setCaptions(e.target.checked)}
+              disabled={exporting}
+              className="h-4 w-4 accent-clay"
+            />
+            Captions in video
+          </label>
+        </div>
+      )}
+
+      {(isRunning || exporting) && (
         <div className="mb-10 rounded-xl border border-line bg-card p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <p className="font-semibold">{PHASE_LABEL[phase]}</p>
@@ -359,7 +404,15 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
               className="h-full bg-clay transition-all duration-500"
               style={{
                 width: `${
-                  phase === "storyboard" ? 6 : phase === "cast" ? 14 : scenes.length ? 14 + (completed / scenes.length) * 84 : 10
+                  exporting
+                    ? exportPercent(statusLine)
+                    : phase === "storyboard"
+                      ? 6
+                      : phase === "cast"
+                        ? 14
+                        : scenes.length
+                          ? 14 + (completed / scenes.length) * 84
+                          : 10
                 }%`,
               }}
             />
@@ -493,6 +546,14 @@ export default function ProjectFactory({ initialProject, initialScenes }: Props)
       </div>
     </div>
   );
+}
+
+/** Rough progress for exports, read from the "Step n/total" status line. */
+function exportPercent(status: string): number {
+  const m = /(\d+)\/(\d+)/.exec(status);
+  if (!m) return status ? 92 : 4;
+  const frac = Number(m[1]) / Number(m[2]);
+  return /render/i.test(status) ? 25 + frac * 65 : 4 + frac * 20;
 }
 
 /** Plays the short in the browser: each shot's image while its audio plays. */

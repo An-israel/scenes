@@ -4,8 +4,6 @@
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash";
-// SVG art uses flash-lite: 4x the free daily quota, plenty for simple vectors.
-export const ART_MODEL = process.env.GEMINI_ART_MODEL ?? "gemini-2.5-flash-lite";
 export const TTS_MODEL = process.env.GEMINI_TTS_MODEL ?? "gemini-2.5-flash-preview-tts";
 export const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
 
@@ -38,21 +36,6 @@ async function callModel(apiKey: string, model: string, body: unknown): Promise<
   return res.json();
 }
 
-/** Cheap key check: list models (no quota consumed). */
-export async function validateKey(apiKey: string): Promise<void> {
-  const res = await fetch(`${BASE}/models?pageSize=1`, {
-    headers: { "x-goog-api-key": apiKey },
-  });
-  if (!res.ok) {
-    throw new GeminiError(
-      res.status === 400 || res.status === 403
-        ? "Google rejected this API key. Double-check it in AI Studio."
-        : `Key validation failed (HTTP ${res.status})`,
-      res.status
-    );
-  }
-}
-
 /** JSON text generation (storyboard fallback when no Claude key is set). */
 export async function generateJson(apiKey: string, prompt: string): Promise<string> {
   const data = await callModel(apiKey, TEXT_MODEL, {
@@ -61,19 +44,6 @@ export async function generateJson(apiKey: string, prompt: string): Promise<stri
       responseMimeType: "application/json",
       temperature: 0.4,
     },
-  });
-  const text = data?.candidates?.[0]?.content?.parts
-    ?.map((p: any) => p.text ?? "")
-    .join("");
-  if (!text) throw new GeminiError("Gemini returned an empty response", 502);
-  return text;
-}
-
-/** Free-form text generation (no JSON forcing) — used for SVG scene art. */
-export async function generateText(apiKey: string, prompt: string): Promise<string> {
-  const data = await callModel(apiKey, ART_MODEL, {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.7 },
   });
   const text = data?.candidates?.[0]?.content?.parts
     ?.map((p: any) => p.text ?? "")
